@@ -1,0 +1,35 @@
+# Push a tag like v1.0.1 and this builds the zip and uploads it to CurseForge
+# (project 1803451, read from the TOC) and to GitHub Releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # lets the packager create the GitHub release
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.3"
+      - run: lua tests/harness.lua .
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      # The packager's docs and the community guide name these differently; set both.
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+      GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: BigWigsMods/packager@v2

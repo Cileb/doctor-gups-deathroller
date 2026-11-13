@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: Doctor Gup's Deathroller
+## Notes: Challenge another player to a deathroll. Verifies rolls from chat, reveals them with a dice animation, and keeps your stats.
+## Author: Michael
+## Version: @project-version@
+## SavedVariables: DoctorGupsDeathrollerDB
+## IconTexture: Interface\Buttons\UI-GroupLoot-Dice-Up
+## AddonCompartmentFunc: DoctorGupsDeathroller_OnCompartmentClick
+## X-Curse-Project-ID: 1803451
+
+Core.lua
+Widgets.lua
+GameUI.lua
+ChallengeUI.lua
+TradeUI.lua
+StatsUI.lua
+OptionsUI.lua
+Minimap.lua

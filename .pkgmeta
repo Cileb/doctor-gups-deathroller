@@ -1,0 +1,10 @@
+# BigWigs packager settings. Builds DoctorGupsDeathroller-<tag>.zip containing just the add-on.
+package-as: DoctorGupsDeathroller
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - tests
+  - README.md
