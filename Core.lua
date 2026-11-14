@@ -544,8 +544,9 @@ function ns.StartChallenge(target, wager, opts)
     }
     S.game = g
     -- extra fields (older versions ignore them): is the challenger announcing? double or nothing?
+    -- and a final 1 = "flip for who rolls first" (1.1.x ignores it and lets the challenger start)
     local announcing = ns.Setting("announceChallenges") and 1 or 0
-    if not Send(target, "CHAL", ns.PROTO, g.id, max, wager, announcing, g.double and 1 or 0) then
+    if not Send(target, "CHAL", ns.PROTO, g.id, max, wager, announcing, g.double and 1 or 0, 1) then
         S.game = nil; UI("Update"); return
     end
 
@@ -624,6 +625,9 @@ local function ProximityTip()
     end
 end
 
+-- true = the accepting player rolls first (its own function so tests can pin it)
+function ns.CoinFlip() return math.random(1, 2) == 1 end
+
 -- announce: whether to emote the accept (the popup's checkbox). nil = use your setting.
 function ns.AcceptInvite(announce)
     local inv = S.invite
@@ -632,13 +636,21 @@ function ns.AcceptInvite(announce)
     UI("HideInvite")
     if S.game and S.game.state ~= "done" then Send(inv.from, "BUSY", inv.id); return end
 
+    -- Coin flip for who rolls first. The accepting side flips and tells the challenger;
+    -- a challenger on 1.1.x doesn't ask for a flip, so they keep rolling first.
+    local iStart = inv.coinFlip and ns.CoinFlip()
     S.game = {
         id = inv.id, opponent = inv.from, challenger = inv.from,
         max = inv.max, startMax = inv.max, wager = inv.wager,
-        turn = inv.from, rolls = {}, state = "active", double = inv.double or nil,
+        turn = iStart and S.me or inv.from, rolls = {}, state = "active", double = inv.double or nil,
     }
-    Send(inv.from, "ACC", inv.id)
-    Print(("Deathroll on! %s rolls first."):format(Short(inv.from)))
+    Send(inv.from, "ACC", inv.id, iStart and 1 or 0)
+    if iStart then
+        Print(("Deathroll on! Coin flip: you roll first. Type /roll %d."):format(inv.max))
+        Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+    else
+        Print(("Deathroll on! %s%s rolls first."):format(inv.coinFlip and "Coin flip: " or "", Short(inv.from)))
+    end
     if announce == nil then announce = ns.Setting("announceChallenges") end
     if announce then
         if inv.double then
@@ -731,7 +743,7 @@ end
 local function OnAddonMessage(text, sender)
     sender = FullName(sender)
     if not sender or SameName(sender, S.me) then return end
-    local cmd, a, b, c, d, e, f = strsplit("|", text)
+    local cmd, a, b, c, d, e, f, g7 = strsplit("|", text)
 
     if cmd == "PING" then
         if GetTime() - (lastPong[sender] or 0) < 0.25 then return end  -- don't let anyone spam replies
@@ -765,7 +777,8 @@ local function OnAddonMessage(text, sender)
         if (S.game and S.game.state ~= "done") or S.invite then Send(sender, "BUSY", id); return end
 
         S.invite = { from = sender, id = id, max = max, wager = math.max(0, math.floor(wager)),
-                     expires = GetTime() + ns.INVITE_TIMEOUT, announced = (e == "1"), double = (f == "1") }
+                     expires = GetTime() + ns.INVITE_TIMEOUT, announced = (e == "1"), double = (f == "1"),
+                     coinFlip = (g7 == "1") }
         UI("ShowInvite", S.invite)
         Sound("READY_CHECK")
         return
@@ -790,7 +803,14 @@ local function OnAddonMessage(text, sender)
 
     if cmd == "ACC" and g.state == "pending" then
         g.state = "active"
-        Print(("%s accepted. You roll first: type /roll %d."):format(Short(sender), g.max))
+        if b == "1" then                                     -- they won the coin flip
+            g.turn = sender
+            Print(("%s accepted. Coin flip: %s rolls first."):format(Short(sender), Short(sender)))
+        else
+            g.turn = S.me
+            Print(("%s accepted. %s roll first: type /roll %d."):format(Short(sender),
+                b == "0" and "Coin flip: you" or "You", g.max))
+        end
         ProximityTip()
         Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
         UI("Update")

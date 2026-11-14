@@ -275,6 +275,10 @@ local ok, err = xpcall(function()
     local B = NewClient("Meudayr Darkpaw", "CAMWOWUS1REALM5PvE")
     for _, c in ipairs(clients) do c.fire("ADDON_LOADED", "DoctorGupsDeathroller"); c.fire("PLAYER_LOGIN") end
     check(A.ns.state.me == "Doctor Gup", "own name uses first + last name")
+    -- existing scenarios assume the challenger rolls first; the coin flip has its own section below
+    local realFlipA, realFlipB = A.ns.CoinFlip, B.ns.CoinFlip
+    A.ns.CoinFlip = function() return false end
+    B.ns.CoinFlip = function() return false end
 
     print("== challenge by target, accept")
     A.target = "Meudayr Darkpaw"
@@ -871,6 +875,44 @@ local ok, err = xpcall(function()
     Check(B, A)
     check(Notices(B) == b0 + 2, "development copies (no version number) never nag")
     A.ns.VERSION, B.ns.VERSION = "0.9.1", "0.9.1"
+
+    print("== coin flip for who rolls first")
+    local function Duel(flip)
+        B.ns.CoinFlip = function() return flip end
+        Tick(25)
+        A.target = B.name
+        A.env.SlashCmdList.GUPSDEATHROLLER("challenge 0"); GoChallenge(A); Tick(0.2)
+        B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+        return A.ns.state.game, B.ns.state.game
+    end
+    local function Finish()
+        A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.5)
+    end
+    local ga, gb = Duel(true)
+    check(ga.state == "active" and ga.turn == B.name and gb.turn == B.name, "accepter wins the flip: both agree they roll first")
+    check(B.ns.IsMyTurn() and not A.ns.IsMyTurn(), "only the accepter may roll")
+    B.forced = { 40 }; TypeInBox(B, "/roll 100"); Tick(4)
+    check(#ga.rolls == 1 and ga.max == 40 and ga.turn == A.name, "accepter's first roll lands for both, then it's the challenger's turn")
+    Finish()
+    ga, gb = Duel(false)
+    check(ga.turn == A.name and gb.turn == A.name, "challenger wins the flip: both agree the challenger starts")
+    Finish()
+    -- a challenger on 1.1.x sends no flip request, so the challenger always starts
+    B.ns.CoinFlip = function() return true end
+    local sent = {}
+    local realSend = A.env.C_ChatInfo.SendAddonMessage
+    A.env.C_ChatInfo.SendAddonMessage = function(prefix, msg, ...)
+        if msg:sub(1, 5) == "CHAL|" then msg = msg:gsub("|1$", "") end
+        return realSend(prefix, msg, ...)
+    end
+    ga, gb = Duel(true)
+    check(gb.turn == A.name and ga.turn == A.name, "old challenger (no flip field): challenger still rolls first")
+    Finish()
+    A.env.C_ChatInfo.SendAddonMessage = realSend
+    -- the real flip picks both sides over many games
+    local heads = 0
+    for _ = 1, 200 do if realFlipB() then heads = heads + 1 end end
+    check(heads > 60 and heads < 140, "real coin flip is roughly even (" .. heads .. "/200)")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end
