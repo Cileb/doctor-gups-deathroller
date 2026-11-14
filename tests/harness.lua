@@ -66,6 +66,8 @@ function Methods:SetWidth(w) self._w = w end
 function Methods:GetCenter() return 500, 500 end
 function Methods:GetEffectiveScale() return 1 end
 function Methods:GetStringHeight() return 24 end
+function Methods:EnableKeyboard(on) self._kb = on and true or false end
+function Methods:IsKeyboardEnabled() return self._kb == true end
 -- rough text metrics so name fitting can be tested: ~0.55 em per character
 function Methods:SetFont(_, size) self._fontSize = size; return true end
 function Methods:GetUnboundedStringWidth() return self:GetStringWidth() end
@@ -119,6 +121,8 @@ local function NewClient(fullName, shard)
     env.BreakUpLargeNumbers = function(n) return tostring(n) end
     env.ChatTypeInfo = { SYSTEM = { r = 1, g = 1, b = 0 } }
     env.IsInGroup = function() return false end
+    env.IsInInstance = function() return c.inInstance == true end
+    env.wipe = env.wipe or function(t) for k in pairs(t) do t[k] = nil end return t end
     env.IsShiftKeyDown = function() return false end
     env.Minimap = c.NewWidget("Minimap")
     env.GetCursorPosition = function() return c.cursor and c.cursor[1] or 0, c.cursor and c.cursor[2] or 0 end
@@ -217,6 +221,9 @@ local function Tick(seconds)
             for _, w in ipairs(c.widgets) do
                 if w._scripts.OnUpdate and w:IsVisible() then w:Fire("OnUpdate", 0.05) end
             end
+            -- the player keeps pressing keys (moving etc.), which lets held emotes go out
+            local kw = c.ns and c.ns.keyWatcher
+            if kw and kw._kb and c.autoKeys ~= false then kw:Fire("OnKeyDown", "W") end
         end
     end
 end
@@ -499,13 +506,13 @@ local ok, err = xpcall(function()
     check(A.ns.state.game.won and AF.announce:IsShown() and AF.announce:IsEnabled(), "result screen shows an Announce button")
     check(AF.milestones:GetText():find("First deathroll win") ~= nil, "milestone shown: " .. AF.milestones:GetText())
     check(#A.emotes == 1, "nothing announced until you click")
-    AF.announce:Fire("OnClick")
+    AF.announce:Fire("OnClick"); Tick(0.2)                 -- a click: goes out on the next key press
     check(A.emotes[2] == "EMOTE: wins a deathroll against Meudayr Darkpaw for 25g in 2 rolls!", "result emote: " .. tostring(A.emotes[2]))
     check(A.emotes[3] == "EMOTE: wins their first ever deathroll!", "milestone emote: " .. tostring(A.emotes[3]))
     check(not AF.announce:IsEnabled() and AF.announce.text._text == "Announced", "button turns into 'Announced'")
-    AF.announce:Fire("OnClick")
+    AF.announce:Fire("OnClick"); Tick(0.2)
     check(#A.emotes == 3, "can't announce twice")
-    B.env.GupsDeathrollerFrame.announce:Fire("OnClick")
+    B.env.GupsDeathrollerFrame.announce:Fire("OnClick"); Tick(0.2)
     check(B.emotes[2] == "EMOTE: loses a deathroll to Doctor Gup (25g) after 2 rolls.", "loser's emote: " .. tostring(B.emotes[2]))
     -- rematch inside 20s: challenge emote is throttled
     A.ns.state.game.won = true
@@ -658,7 +665,7 @@ local ok, err = xpcall(function()
     TypeInBox(A, "/roll 100"); Tick(5)
     B.ns.Forfeit(); Tick(0.3)
     A.env.GupsDeathrollerFrame.announce:Fire("OnClick")
-    B.env.GupsDeathrollerFrame.announce:Fire("OnClick")
+    B.env.GupsDeathrollerFrame.announce:Fire("OnClick"); Tick(0.2)
     check(A.emotes[#A.emotes] == "EMOTE: wins a deathroll against Meudayr Darkpaw after 1 roll - Meudayr forfeited.", "forfeit win: " .. A.emotes[#A.emotes])
     check(B.emotes[#B.emotes] == "EMOTE: forfeits a deathroll to Doctor Gup after 1 roll.", "forfeit loss: " .. B.emotes[#B.emotes])
 
@@ -1032,6 +1039,40 @@ local ok, err = xpcall(function()
     B.env.SendChatMessage = realSendB
     A.target = nil
     A.env.GupsDeathrollerFrame.closeBtn:Fire("OnClick"); A.ns.ClearFinished()
+
+    print("== Forever: emotes need a key press")
+    A.autoKeys = false
+    local n0 = #A.emotes
+    A.target = nil
+    A.env.SlashCmdList.GUPSDEATHROLLER("open 1"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.5)
+    check(#A.emotes == n0 and A.ns.state.game.state == "open", "clicking Post: emote held, challenge is open")
+    check(Logged(A, "goes out on your next key press"), "says it goes out on the next key press")
+    A.ns.keyWatcher:Fire("OnKeyDown", "W")
+    check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge for 1g! /roll 100 to accept.",
+        "next key press sends it: " .. tostring(A.emotes[#A.emotes]))
+    check(not A.ns.keyWatcher:IsKeyboardEnabled(), "stops listening to keys once nothing is waiting")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)   -- typed: the call-off goes out at once
+    check(A.emotes[#A.emotes] == "EMOTE: calls off the deathroll.", "a typed /dr command emotes at once")
+    n0 = #A.emotes
+    A.env.SlashCmdList.GUPSDEATHROLLER("open 2"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.input:Fire("OnEnterPressed"); Tick(0.1)
+    check(#A.emotes == n0 + 1 and A.emotes[#A.emotes]:find("for 2g!") ~= nil, "pressing Enter in the window emotes at once")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    -- old held emotes don't go out late
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
+    A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(31)
+    n0 = #A.emotes
+    A.ns.keyWatcher:Fire("OnKeyDown", "W"); A.ns.keyWatcher:Fire("OnKeyDown", "W")
+    check(#A.emotes == n0, "held emotes older than 30 s are dropped")
+    -- inside an instance a click is enough
+    A.inInstance = true
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
+    check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge! /roll 100 to accept.", "in an instance: sent at once")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    A.inInstance, A.autoKeys = nil, nil
 
     print("== coin flip for who rolls first")
     local function Duel(flip)

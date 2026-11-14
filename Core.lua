@@ -496,13 +496,26 @@ end
 -- click or key press, so these are only called from /dr commands and buttons.
 ---------------------------------------------------------------------------
 
--- WoW can still refuse an emote after a click: add-on chat is locked down in some
--- content, and some Forever clients block it outright (that shows up as an
--- ADDON_ACTION_BLOCKED error). So check first, and if WoW blocks one anyway, stop
--- trying until /reload instead of piling up errors. The game itself never depends
--- on an emote getting through.
-local lastEmote, lastLockdownNote = 0, 0
+-- Emotes. Since Forever 1.60.1 an add-on emote outside instances needs a hardware
+-- event, and on Forever a click on an add-on window doesn't count: only a key press
+-- does. So an emote is sent at once when we're handling a key press (a /dr command,
+-- Enter in our windows, or inside an instance), and otherwise held and sent on your
+-- next key press. If WoW blocks one even then, we stop trying until /reload rather
+-- than pile up errors. Games never depend on an emote getting through.
+local lastEmote, lastLockdownNote, lastQueueNote = 0, 0, 0
 local emoteBlocked, emoting, emoteWasBlocked = false, false, false
+local queue = {}                       -- { text, t } waiting for a key press
+local QUEUE_LIFETIME = 30              -- stale announcements are dropped
+
+-- Set while handling a key press (slash commands, Enter in our windows).
+ns.keyPress = false
+function ns.WithKeyPress(fn, ...)
+    local was = ns.keyPress
+    ns.keyPress = true
+    local ok, err = pcall(fn, ...)
+    ns.keyPress = was
+    if not ok then error(err, 0) end
+end
 
 -- Called from the ADDON_ACTION_BLOCKED / _FORBIDDEN events, which fire during the call.
 function ns.OnActionBlocked(addon)
@@ -510,11 +523,41 @@ function ns.OnActionBlocked(addon)
     emoteWasBlocked = true
     if not emoteBlocked then
         emoteBlocked = true
+        wipe(queue)
         Print("WoW blocked an announcement from this add-on, so it won't post emotes again until you /reload. Your games aren't affected.")
     end
 end
 
--- Returns true if sent, or false plus a reason: "combat", "lockdown", "blocked".
+local function SendNow(text)
+    local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
+    if not send then return false end
+    emoting, emoteWasBlocked = true, false
+    local ok = pcall(send, text, "EMOTE")
+    emoting = false
+    if emoteWasBlocked then ok = false end
+    if not ok then Debug("emote blocked: " .. text) end
+    lastEmote = GetTime()
+    return ok
+end
+
+-- Listens for the next key press (passing every key on) while emotes are waiting.
+local keyWatcher = CreateFrame("Frame")
+ns.keyWatcher = keyWatcher
+local function WatchKeys(on)
+    if InCombatLockdown and InCombatLockdown() then return end   -- keyboard setup is off-limits in combat
+    keyWatcher:EnableKeyboard(on)
+    if on then keyWatcher:SetPropagateKeyboardInput(true) end
+end
+keyWatcher:SetScript("OnKeyDown", function()
+    -- one emote per key press (one protected action per hardware event)
+    while queue[1] and GetTime() - queue[1].t > QUEUE_LIFETIME do table.remove(queue, 1) end
+    local item = table.remove(queue, 1)
+    if item and not emoteBlocked then SendNow(item.text) end
+    if not queue[1] then WatchKeys(false) end
+end)
+
+-- Returns true if sent or queued (second value "queued"), or false plus a reason:
+-- "combat", "lockdown", "blocked".
 local function Emote(text)
     if emoteBlocked then return false, "blocked" end
     if InCombatLockdown and InCombatLockdown() then return false, "combat" end
@@ -525,15 +568,19 @@ local function Emote(text)
         end
         return false, "lockdown"
     end
-    local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
-    if not send then return false, "blocked" end
-    emoting, emoteWasBlocked = true, false
-    local ok = pcall(send, text, "EMOTE")
-    emoting = false
-    if emoteWasBlocked then ok = false end
-    if not ok then Debug("emote blocked: " .. text) end
+    local inInstance = IsInInstance and IsInInstance()
+    if ns.keyPress or inInstance then
+        local ok = SendNow(text)
+        return ok, (not ok) and "blocked" or nil
+    end
+    queue[#queue + 1] = { text = text, t = GetTime() }
     lastEmote = GetTime()
-    return ok, (not ok) and "blocked" or nil
+    WatchKeys(true)
+    if GetTime() - lastQueueNote > 60 then
+        lastQueueNote = GetTime()
+        Print("WoW only lets add-ons post emotes after a key press, so the announcement goes out on your next key press.")
+    end
+    return true, "queued"
 end
 
 local function WagerText(wager, fmt)
@@ -656,7 +703,7 @@ function ns.StartOpenChallenge(wager, only, opts)
     else
         line = ("issues an open deathroll challenge%s! /roll %d to accept."):format(WagerText(wager, " for %sg"), max)
     end
-    local posted, why = Emote(line)
+    local posted, why = Emote(line)   -- posted can also mean "queued for your next key press"
     if not posted and why == "combat" then Print("Couldn't post the challenge: you're in combat."); return end
 
     local g = {
@@ -1108,7 +1155,11 @@ SLASH_GUPSDEATHROLLER1 = "/deathroll"
 SLASH_GUPSDEATHROLLER2 = "/dr"
 SLASH_GUPSDEATHROLLER3 = "/deathroller"
 SLASH_GUPSDEATHROLLER4 = "/gup"          -- always free, in case another deathroll add-on also uses /dr
+local OnSlash
 SlashCmdList.GUPSDEATHROLLER = function(input)
+    ns.WithKeyPress(OnSlash, input)      -- typed + Enter: emotes can go out at once
+end
+OnSlash = function(input)
     local args = {}
     for word in (input or ""):gmatch("%S+") do args[#args + 1] = word end
     local cmd = (args[1] or ""):lower()

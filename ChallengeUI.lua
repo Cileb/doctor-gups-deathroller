@@ -113,7 +113,7 @@ local function Create()
     f.input:SetJustifyH("CENTER")
     f.input.placeholder:SetJustifyH("CENTER")
     f.input.OnChanged = function() Refresh() end
-    f.input:SetScript("OnEnterPressed", Submit)
+    f.input:SetScript("OnEnterPressed", function() ns.WithKeyPress(Submit) end)   -- Enter is a key press: emote at once
     f.input:SetScript("OnEscapePressed", function() f:Hide() end)
 
     -- quick picks

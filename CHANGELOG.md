@@ -1,3 +1,7 @@
+## 1.3.1
+
+- **Fix: announcements work again on WoW Forever.** Since Forever 1.60.1, add-ons can only post emotes after a key press, and a click on an add-on window doesn't count. Announcements now go out at once when you type a `/dr` command or press Enter in the window. After a click, they go out on your next key press (any key, such as moving). Held announcements are dropped after 30 seconds, so they never post late.
+
 ## 1.3.0
 
 - **Open challenges: play anyone, add-on or not.** Type `/dr open [gold]` (or click **Open challenge** in the stats window). Your character emotes the challenge, and the first player nearby to type `/roll 100` within 60 seconds is your opponent. That roll is their first roll. The add-on referees the whole game from chat, with the same window, dice reveal, odds and close calls.
