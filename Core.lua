@@ -496,15 +496,44 @@ end
 -- click or key press, so these are only called from /dr commands and buttons.
 ---------------------------------------------------------------------------
 
-local lastEmote = 0
+-- WoW can still refuse an emote after a click: add-on chat is locked down in some
+-- content, and some Forever clients block it outright (that shows up as an
+-- ADDON_ACTION_BLOCKED error). So check first, and if WoW blocks one anyway, stop
+-- trying until /reload instead of piling up errors. The game itself never depends
+-- on an emote getting through.
+local lastEmote, lastLockdownNote = 0, 0
+local emoteBlocked, emoting, emoteWasBlocked = false, false, false
+
+-- Called from the ADDON_ACTION_BLOCKED / _FORBIDDEN events, which fire during the call.
+function ns.OnActionBlocked(addon)
+    if addon ~= ADDON_NAME or not emoting then return end
+    emoteWasBlocked = true
+    if not emoteBlocked then
+        emoteBlocked = true
+        Print("WoW blocked an announcement from this add-on, so it won't post emotes again until you /reload. Your games aren't affected.")
+    end
+end
+
+-- Returns true if sent, or false plus a reason: "combat", "lockdown", "blocked".
 local function Emote(text)
-    if InCombatLockdown and InCombatLockdown() then return false end
+    if emoteBlocked then return false, "blocked" end
+    if InCombatLockdown and InCombatLockdown() then return false, "combat" end
+    if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown() then
+        if GetTime() - lastLockdownNote > 30 then
+            lastLockdownNote = GetTime()
+            Print("Announcements are paused here: WoW doesn't let add-ons post emotes in this area right now.")
+        end
+        return false, "lockdown"
+    end
     local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
-    if not send then return false end
+    if not send then return false, "blocked" end
+    emoting, emoteWasBlocked = true, false
     local ok = pcall(send, text, "EMOTE")
+    emoting = false
+    if emoteWasBlocked then ok = false end
     if not ok then Debug("emote blocked: " .. text) end
     lastEmote = GetTime()
-    return ok
+    return ok, (not ok) and "blocked" or nil
 end
 
 local function WagerText(wager, fmt)
@@ -543,7 +572,11 @@ function ns.AnnounceResult()
     else
         line = ("loses a deathroll to %s%s after %s."):format(opp, WagerText(g.wager, " (%sg)"), rolls)
     end
-    if not Emote(line) then Print("Couldn't announce right now (in combat?)."); return end
+    local ok, why = Emote(line)
+    if not ok then
+        if why == "combat" then Print("Couldn't announce right now: you're in combat.") end
+        return
+    end
     if ns.Setting("announceMilestones") then
         for i, m in ipairs(g.milestones or {}) do
             if i > 2 then break end
@@ -623,7 +656,8 @@ function ns.StartOpenChallenge(wager, only, opts)
     else
         line = ("issues an open deathroll challenge%s! /roll %d to accept."):format(WagerText(wager, " for %sg"), max)
     end
-    if not Emote(line) then Print("Couldn't post the challenge right now (in combat?)."); return end
+    local posted, why = Emote(line)
+    if not posted and why == "combat" then Print("Couldn't post the challenge: you're in combat."); return end
 
     local g = {
         id = NewId(), opponent = only, only = only, challenger = S.me, noAddon = true,
@@ -637,6 +671,11 @@ function ns.StartOpenChallenge(wager, only, opts)
     else
         Print(("Open challenge posted. The first player nearby to type /roll %d in the next %d seconds is your opponent, and that roll comes first. They don't need the add-on."):format(
             max, ns.OPEN_TIMEOUT))
+    end
+    if not posted then
+        -- the game works without the emote; people just need to be told
+        Print(("WoW wouldn't let the add-on post the challenge, so tell people yourself, for example in /say: \"%s, /roll %d to accept.\""):format(
+            only and FirstName(only) or "Deathroll me", max))
     end
     ProximityTip()
     UI("Update")
@@ -1135,6 +1174,9 @@ events:RegisterEvent("CHAT_MSG_ADDON")
 for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_MONEY_CHANGED", "TRADE_ACCEPT_UPDATE", "UI_INFO_MESSAGE" }) do
     events:RegisterEvent(e)
 end
+for _, e in ipairs({ "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do
+    pcall(events.RegisterEvent, events, e)          -- tells us when WoW refuses an emote
+end
 
 events:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" then
@@ -1171,6 +1213,9 @@ events:SetScript("OnEvent", function(_, event, ...)
         local who, roll, lo, hi = ParseRoll(msg)
         Debug(("system: %s  ->  %s"):format(msg, who and ("%s %d (%d-%d)"):format(who, roll, lo, hi) or "not a roll"))
         if who then HandleRoll(who, roll, lo, hi, true, msg) end
+
+    elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+        ns.OnActionBlocked(...)
 
     elseif event:find("^TRADE_") or event == "UI_INFO_MESSAGE" then
         OnTradeEvent(event, ...)
