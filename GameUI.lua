@@ -331,9 +331,8 @@ local function UpdateOdds(g)
     o.caption:SetText(g.state == "done" and "FINAL" or "CHANCE TO WIN")
 end
 
--- "1% chance of a 1" from 100, "1 in 7" once it's close.
+-- "1% chance of a 1" from 100 (only shown above 10; close calls speak for themselves).
 local function OneChance(n)
-    if n <= 10 then return ("1 IN %d CHANCE OF A 1"):format(n) end
     return ("%d%% CHANCE OF A 1"):format(math.max(1, math.floor(100 / n + 0.5)))
 end
 
@@ -443,7 +442,8 @@ local function Update()
         f.big:SetTextColor(unpack(mine and C.gold or C.text))
         local level = TensionLevel(g)
         if level > 0 then
-            f.rangeLabel:SetText(W.Color(level == 2 and "loss" or "warn", "CLOSE CALL") .. "   " .. OneChance(g.max))
+            -- at this range the risk speaks for itself; no odds needed
+            f.rangeLabel:SetText(W.Color(level == 2 and "loss" or "warn", "CLOSE CALL") .. "   ROLL 1 TO")
         else
             f.rangeLabel:SetText("ROLL 1 TO   " .. W.Color("muted", "(" .. OneChance(g.max):lower() .. ")"))
         end

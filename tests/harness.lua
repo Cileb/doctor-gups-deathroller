@@ -795,7 +795,8 @@ local ok, err = xpcall(function()
 
     print("== close calls")
     check(BF.tension == 2 and AF.tension == 2, "range 2: critical on both screens")
-    check(BF.rangeLabel:GetText():find("CLOSE CALL") and BF.rangeLabel:GetText():find("1 IN 2 CHANCE OF A 1"), "critical label: " .. BF.rangeLabel:GetText())
+    check(BF.rangeLabel:GetText():find("CLOSE CALL") and BF.rangeLabel:GetText():find("ROLL 1 TO") and not BF.rangeLabel:GetText():find("CHANCE"),
+        "critical label is just CLOSE CALL, ROLL 1 TO: " .. BF.rangeLabel:GetText())
     B.ns.SetSetting("closeCallFx", false)
     check(BF.tension == 0, "turning the option off clears the effects mid-game")
     B.ns.SetSetting("closeCallFx", true)
@@ -820,7 +821,7 @@ local ok, err = xpcall(function()
     check(B.ns.state.game.double and BF.potLabel:GetText():find("DOUBLE OR NOTHING"), "the game window marks it as double or nothing")
     A.forced = { 7 }
     TypeInBox(A, "/roll 100"); Tick(4)
-    check(BF.tension == 1 and BF.rangeLabel:GetText():find("1 IN 7"), "range 7: close call (amber)")
+    check(BF.tension == 1 and BF.rangeLabel:GetText():find("CLOSE CALL") and not BF.rangeLabel:GetText():find("CHANCE"), "range 7: close call (amber), no odds in the label")
     A.ns.Forfeit(); Tick(3)
     check(A.ns.GetDebt("Meudayr Darkpaw") == 30 - 60, "debt nets out: won 30, lost 60 (" .. A.ns.GetDebt("Meudayr Darkpaw") .. ")")
     A.env.GupsDeathrollerFrame:Hide(); B.env.GupsDeathrollerFrame:Hide()
