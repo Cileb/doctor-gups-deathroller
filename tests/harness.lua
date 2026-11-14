@@ -61,7 +61,8 @@ function Methods:SetValue(v) self._value = v end
 function Methods:GetValue() return self._value end
 function Methods:AddMessage(msg) self._client.log("[chat] " .. msg) end
 function Methods:Play() end
-function Methods:GetWidth() return 140 end
+function Methods:GetWidth() return rawget(self, "_w") or 140 end
+function Methods:SetWidth(w) self._w = w end
 function Methods:GetCenter() return 500, 500 end
 function Methods:GetEffectiveScale() return 1 end
 function Methods:GetStringHeight() return 24 end
@@ -768,6 +769,68 @@ local ok, err = xpcall(function()
     A.ns.ResetStats()
     check(A.ns.GetDebt("Meudayr Darkpaw") == 10, "resetting stats keeps debts (they're real gold)")
     A.env.GupsDeathrollerMinimapButton:Fire("OnEnter")
+
+    print("== survival odds")
+    local function near(a, b) return math.abs(a - b) < 1e-9 end
+    check(near(A.ns.LoseChance(2), 2/3) and near(A.ns.LoseChance(3), 7/12), "odds maths: L(2) = 2/3, L(3) = 7/12")
+    check(math.abs(A.ns.LoseChance(100) - 0.5) < 0.001, "from 100 it's a coin flip (" .. A.ns.LoseChance(100) .. ")")
+    if A.ns.state.game and A.ns.state.game.state ~= "done" then A.ns.Forfeit(); Tick(3) end
+    A.env.GupsDeathrollerFrame:Hide(); B.env.GupsDeathrollerFrame:Hide()
+    A.ns.GetDB().debts = {}; B.ns.GetDB().debts = {}
+    Tick(1)
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge Meudayr Darkpaw"); A.env.GupsDeathrollerChallengeFrame.input:SetText("30"); GoChallenge(A)
+    Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    local AF, BF = A.env.GupsDeathrollerFrame, B.env.GupsDeathrollerFrame
+    check(AF.odds.meText:GetText() == "50%" and AF.odds.themText:GetText() == "50%", "starts at 50% / 50%")
+    check(AF.rangeLabel:GetText():find("ROLL 1 TO") and AF.rangeLabel:GetText():find("1%% chance of a 1"), "label: " .. AF.rangeLabel:GetText())
+    A.forced = { 2 }
+    TypeInBox(A, "/roll 100"); Tick(0.4)
+    check(AF.odds.meText:GetText() == "50%", "odds don't move while the dice are still spinning")
+    Tick(1.9)
+    check(AF.odds.meText:GetText() == "67%" and BF.odds.meText:GetText() == "33%", "after a 2, the next roller has 33%: " .. AF.odds.meText:GetText() .. " / " .. BF.odds.meText:GetText())
+    check(AF.odds.meDelta:GetText():find("+17") ~= nil and BF.odds.meDelta:GetText():find("-17") ~= nil, "the change is shown: " .. AF.odds.meDelta:GetText())
+    Tick(4)
+    check(AF.odds.meDelta:GetText() == "", "the change fades after a few seconds")
+
+    print("== close calls")
+    check(BF.tension == 2 and AF.tension == 2, "range 2: critical on both screens")
+    check(BF.rangeLabel:GetText():find("CLOSE CALL") and BF.rangeLabel:GetText():find("1 IN 2 CHANCE OF A 1"), "critical label: " .. BF.rangeLabel:GetText())
+    B.ns.SetSetting("closeCallFx", false)
+    check(BF.tension == 0, "turning the option off clears the effects mid-game")
+    B.ns.SetSetting("closeCallFx", true)
+    check(BF.tension == 2, "and turning it back on restores them")
+    B.forced = { 1 }
+    TypeInBox(B, "/roll 2"); Tick(5)
+    check(AF.tension == 0 and AF.odds.meText:GetText() == "100%" and AF.odds.caption:GetText() == "FINAL", "game over: effects cleared, odds final")
+
+    print("== double or nothing")
+    check(AF.double:IsShown() and AF.rematch._w == 144, "result screen offers double or nothing next to rematch")
+    A.ns.SetSetting("announceChallenges", true); B.ns.SetSetting("announceChallenges", true)
+    local aE, bE = #A.emotes, #B.emotes
+    AF.double:Fire("OnEnter"); AF.double:Fire("OnLeave")
+    AF.double:Fire("OnClick"); Tick(0.2)
+    local g2 = A.ns.state.game
+    check(g2.state == "pending" and g2.wager == 60 and g2.double, "double or nothing challenges for 60g")
+    check(A.emotes[#A.emotes] == "EMOTE: goes double or nothing against Meudayr Darkpaw for 60g!", "emote: " .. tostring(A.emotes[#A.emotes]))
+    local IFd = B.env.GupsDeathrollerInviteFrame
+    check(IFd.pot.label:GetText():find("DOUBLE OR NOTHING") and IFd.sub:GetText():find("double or nothing") and IFd.pot.amount:GetText() == "60g", "the popup says double or nothing, for 60g")
+    IFd.accept:Fire("OnClick"); Tick(0.2)
+    check(B.emotes[#B.emotes] == "EMOTE: accepts Doctor Gup's double or nothing for 60g!", "accept emote: " .. tostring(B.emotes[#B.emotes]))
+    check(B.ns.state.game.double and BF.potLabel:GetText():find("DOUBLE OR NOTHING"), "the game window marks it as double or nothing")
+    A.forced = { 7 }
+    TypeInBox(A, "/roll 100"); Tick(4)
+    check(BF.tension == 1 and BF.rangeLabel:GetText():find("1 IN 7"), "range 7: close call (amber)")
+    A.ns.Forfeit(); Tick(3)
+    check(A.ns.GetDebt("Meudayr Darkpaw") == 30 - 60, "debt nets out: won 30, lost 60 (" .. A.ns.GetDebt("Meudayr Darkpaw") .. ")")
+    A.env.GupsDeathrollerFrame:Hide(); B.env.GupsDeathrollerFrame:Hide()
+    Tick(25)
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge Meudayr Darkpaw"); GoChallenge(A); Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    A.ns.Forfeit(); Tick(3)
+    check(not AF.double:IsShown() and AF.rematch._w == 296, "friendly game: no double or nothing, rematch fills the row")
+    A.ns.state.game.wager = 6000000
+    check(not A.ns.CanDouble(A.ns.state.game), "can't double past the 7-digit wager limit")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end

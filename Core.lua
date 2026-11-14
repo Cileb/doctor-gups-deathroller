@@ -19,6 +19,7 @@ ns.VERSION        = "?"           -- from the TOC, set on ADDON_LOADED
 ns.START_ROLL     = 100           -- every deathroll starts at 1-100
 ns.INVITE_TIMEOUT = 60            -- seconds to answer a challenge
 ns.HISTORY_SIZE   = 1000          -- games kept for the stats window
+ns.MAX_WAGER      = 9999999       -- the wager box allows 7 digits
 
 -- Shared state the UI files read. Never replace this table, only its fields.
 local S = { game = nil, invite = nil, me = nil }
@@ -41,6 +42,7 @@ ns.DEFAULTS = {
     revealSpeed   = "normal",  -- fast / normal / slow
     hideRollChat  = true,      -- hide game roll lines in chat until revealed
     sound         = true,
+    closeCallFx   = true,      -- pulse, red trim and a warning sound when the range gets small
     announceChallenges = false, -- emote when you challenge someone or accept a challenge
     announceResults    = true,  -- show an "Announce" button on the result screen
     announceMilestones = true,  -- include milestones (streaks, biggest pot, ...) in that announcement
@@ -145,6 +147,20 @@ ns.Print, ns.Debug, ns.Sound, ns.IsSecret = Print, Debug, Sound, IsSecret
 ns.FullName, ns.SameName, ns.Short, ns.FirstName, ns.Num = FullName, SameName, Short, FirstName, Num
 
 function ns.GetDB() return DB end
+
+-- Chance that the player about to roll from 1..n ends up losing (rolls the 1 first).
+-- Rolling k > 1 hands the opponent a roll from k (k = n included), so:
+--   L(n) = 1/n + (1/n) * sum_{k=2..n} (1 - L(k))   =>   L(n) = (2 + S) / (n + 1),
+-- where S = sum_{k=2..n-1} (1 - L(k)). L(2) = 2/3; L(100) is almost exactly 1/2.
+local loseMemo, loseSum = { [1] = 1 }, 0
+function ns.LoseChance(n)
+    n = math.max(1, math.floor(n))
+    for k = #loseMemo + 1, n do
+        loseMemo[k] = (2 + loseSum) / (k + 1)
+        loseSum = loseSum + (1 - loseMemo[k])
+    end
+    return loseMemo[n]
+end
 
 function ns.IsMyTurn()
     local g = S.game
@@ -468,6 +484,11 @@ end
 
 local function AnnounceChallenge(g)
     if not ns.Setting("announceChallenges") then return end
+    if g.double then
+        -- double or nothing always gets its own line, even right after the last game
+        Emote(("goes double or nothing against %s for %sg!"):format(Short(g.opponent), Num(g.wager)))
+        return
+    end
     if GetTime() - lastEmote < 20 then return end           -- don't spam rematches
     Emote(("challenges %s to a deathroll%s!"):format(Short(g.opponent), WagerText(g.wager, " for %sg")))
 end
@@ -504,7 +525,8 @@ function ns.AnnounceResult()
     UI("Update")
 end
 
-function ns.StartChallenge(target, wager)
+-- opts.double: this is a double-or-nothing rematch (shown to the other player)
+function ns.StartChallenge(target, wager, opts)
     local max = ns.START_ROLL
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
@@ -518,11 +540,14 @@ function ns.StartChallenge(target, wager)
         max = max, startMax = max, wager = wager,
         turn = S.me, rolls = {}, state = "pending",
         expires = GetTime() + ns.INVITE_TIMEOUT,
+        double = opts and opts.double or nil,
     }
     S.game = g
-    -- last field: is the challenger announcing? (older versions ignore it)
+    -- extra fields (older versions ignore them): is the challenger announcing? double or nothing?
     local announcing = ns.Setting("announceChallenges") and 1 or 0
-    if not Send(target, "CHAL", ns.PROTO, g.id, max, wager, announcing) then S.game = nil; UI("Update"); return end
+    if not Send(target, "CHAL", ns.PROTO, g.id, max, wager, announcing, g.double and 1 or 0) then
+        S.game = nil; UI("Update"); return
+    end
 
     Print(("Challenged %s: 1-%s%s. Waiting for an answer..."):format(Short(target), Num(max),
         wager > 0 and (" for %sg"):format(Num(wager)) or ""))
@@ -557,6 +582,16 @@ end
 function ns.Rematch()
     local g = S.game
     if g and g.state == "done" then ns.StartChallenge(g.opponent, g.wager) end
+end
+
+-- Same opponent, twice the pot. Only for games that had gold on them.
+function ns.CanDouble(g)
+    return g and g.state == "done" and g.wager > 0 and g.wager * 2 <= ns.MAX_WAGER
+end
+
+function ns.DoubleOrNothing()
+    local g = S.game
+    if ns.CanDouble(g) then ns.StartChallenge(g.opponent, g.wager * 2, { double = true }) end
 end
 
 local function CancelChallenge()
@@ -600,13 +635,17 @@ function ns.AcceptInvite(announce)
     S.game = {
         id = inv.id, opponent = inv.from, challenger = inv.from,
         max = inv.max, startMax = inv.max, wager = inv.wager,
-        turn = inv.from, rolls = {}, state = "active",
+        turn = inv.from, rolls = {}, state = "active", double = inv.double or nil,
     }
     Send(inv.from, "ACC", inv.id)
     Print(("Deathroll on! %s rolls first."):format(Short(inv.from)))
     if announce == nil then announce = ns.Setting("announceChallenges") end
     if announce then
-        Emote(("accepts %s's deathroll challenge%s!"):format(Short(inv.from), WagerText(inv.wager, " for %sg")))
+        if inv.double then
+            Emote(("accepts %s's double or nothing for %sg!"):format(Short(inv.from), Num(inv.wager)))
+        else
+            Emote(("accepts %s's deathroll challenge%s!"):format(Short(inv.from), WagerText(inv.wager, " for %sg")))
+        end
     end
     ProximityTip()
     UI("Update")
@@ -674,7 +713,7 @@ end
 local function OnAddonMessage(text, sender)
     sender = FullName(sender)
     if not sender or SameName(sender, S.me) then return end
-    local cmd, a, b, c, d, e = strsplit("|", text)
+    local cmd, a, b, c, d, e, f = strsplit("|", text)
 
     if cmd == "PING" then
         if GetTime() - (lastPong[sender] or 0) < 0.25 then return end  -- don't let anyone spam replies
@@ -706,7 +745,7 @@ local function OnAddonMessage(text, sender)
         if (S.game and S.game.state ~= "done") or S.invite then Send(sender, "BUSY", id); return end
 
         S.invite = { from = sender, id = id, max = max, wager = math.max(0, math.floor(wager)),
-                     expires = GetTime() + ns.INVITE_TIMEOUT, announced = (e == "1") }
+                     expires = GetTime() + ns.INVITE_TIMEOUT, announced = (e == "1"), double = (f == "1") }
         UI("ShowInvite", S.invite)
         Sound("READY_CHECK")
         return

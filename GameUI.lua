@@ -54,7 +54,7 @@ end
 
 local function CreateGameFrame()
     local DB = ns.GetDB()
-    local f = W.Panel("GupsDeathrollerFrame", 320, 386, "Deathroll")
+    local f = W.Panel("GupsDeathrollerFrame", 320, 430, "Deathroll")
     if DB.pos then
         f:SetPoint(DB.pos[1], UIParent, DB.pos[2], DB.pos[3], DB.pos[4])
     else
@@ -80,32 +80,80 @@ local function CreateGameFrame()
     vs:SetPoint("TOP", 0, -59)
     vs:SetText("vs")
 
+    -- chance to win: you (gold, left) vs them (teal, right), under the player cards
+    local odds = CreateFrame("Frame", nil, f)
+    odds:SetSize(296, 5)
+    odds:SetPoint("TOP", 0, -114)
+    odds.bg = W.Tex(odds, { 0, 0, 0, 0.45 })
+    odds.bg:SetAllPoints()
+    odds.mine = W.Tex(odds, { C.gold[1], C.gold[2], C.gold[3], 0.9 }, "ARTWORK")
+    odds.mine:SetPoint("TOPLEFT"); odds.mine:SetPoint("BOTTOMLEFT")
+    odds.theirs = W.Tex(odds, { C.opp[1], C.opp[2], C.opp[3], 0.75 }, "ARTWORK")
+    odds.theirs:SetPoint("TOPRIGHT"); odds.theirs:SetPoint("BOTTOMRIGHT")
+    odds.mid = W.Tex(odds, { C.text[1], C.text[2], C.text[3], 0.5 }, "OVERLAY")   -- the 50% mark
+    odds.mid:SetSize(1, 9)
+    odds.mid:SetPoint("CENTER")
+    odds.caption = W.Text(f, 9, C.muted, { justify = "CENTER" })
+    odds.caption:SetPoint("BOTTOM", odds, "TOP", 0, 4)
+    odds.caption:SetText("CHANCE TO WIN")
+    odds.meText = W.Text(f, 13, C.gold, { title = true })
+    odds.meText:SetPoint("BOTTOMLEFT", odds, "TOPLEFT", 0, 3)
+    odds.meDelta = W.Text(f, 10, C.muted)
+    odds.meDelta:SetPoint("LEFT", odds.meText, "RIGHT", 5, 0)
+    odds.themText = W.Text(f, 13, C.opp, { title = true, justify = "RIGHT" })
+    odds.themText:SetPoint("BOTTOMRIGHT", odds, "TOPRIGHT", 0, 3)
+    odds.themDelta = W.Text(f, 10, C.muted, { justify = "RIGHT" })
+    odds.themDelta:SetPoint("RIGHT", odds.themText, "LEFT", -5, 0)
+    odds.shown, odds.target = 0.5, 0.5
+    function odds:Draw(p)
+        local w = self:GetWidth()
+        self.mine:SetWidth(math.max(0.01, w * p))
+        self.theirs:SetWidth(math.max(0.01, w * (1 - p)))
+    end
+    odds:SetScript("OnUpdate", function(self, dt)            -- glide to the new value
+        if math.abs(self.target - self.shown) < 0.001 then return end
+        self.shown = self.shown + (self.target - self.shown) * math.min(1, dt * 6)
+        self:Draw(self.shown)
+    end)
+    f.odds = odds
+
     -- the pot, front and centre under the players
     f.potBg = W.Tex(f, { C.gold[1], C.gold[2], C.gold[3], 0.07 }, "BACKGROUND", 1)
-    f.potBg:SetPoint("TOPLEFT", 12, -98)
-    f.potBg:SetPoint("TOPRIGHT", -12, -98)
+    f.potBg:SetPoint("TOPLEFT", 12, -126)
+    f.potBg:SetPoint("TOPRIGHT", -12, -126)
     f.potBg:SetHeight(34)
     f.potLabel = W.Text(f, 10, C.gold, { justify = "LEFT" })
     f.potLabel:SetPoint("LEFT", f.potBg, "LEFT", 10, 0)
     f.potLabel:SetText("POT")
     f.pot = W.Pot(f, 22)
-    f.pot:SetPoint("TOP", 0, -104)
+    f.pot:SetPoint("TOP", 0, -132)
 
     -- centre: label, big number, status
     f.rangeLabel = W.Text(f, 10, C.muted, { justify = "CENTER" })
-    f.rangeLabel:SetPoint("TOP", 0, -142)
+    f.rangeLabel:SetWidth(296)
+    f.rangeLabel:SetPoint("TOP", 0, -170)
 
     f.glow = W.Tex(f, { 1, 1, 1, 1 }, "ARTWORK")
     f.glow:SetSize(220, 56)
-    f.glow:SetPoint("TOP", 0, -154)
+    f.glow:SetPoint("TOP", 0, -182)
     f.glow:SetAlpha(0)
     local flash = f.glow:CreateAnimationGroup()
     local fa = flash:CreateAnimation("Alpha")
     fa:SetFromAlpha(0.35); fa:SetToAlpha(0); fa:SetDuration(0.7)
     f.flash = flash
 
+    -- close-call pulses (looping; speed set per level)
+    f.glowPulse = f.glow:CreateAnimationGroup()
+    f.glowPulse:SetLooping("BOUNCE")
+    f.glowPulseA = f.glowPulse:CreateAnimation("Alpha")
+    f.glowPulseA:SetFromAlpha(0.04); f.glowPulseA:SetToAlpha(0.22)
+
     f.big = W.Text(f, 44, C.text, { justify = "CENTER", flags = "OUTLINE", title = true })
-    f.big:SetPoint("TOP", 0, -156)
+    f.big:SetPoint("TOP", 0, -184)
+    f.bigPulse = f.big:CreateAnimationGroup()
+    f.bigPulse:SetLooping("BOUNCE")
+    f.bigPulseA = f.bigPulse:CreateAnimation("Alpha")
+    f.bigPulseA:SetFromAlpha(1); f.bigPulseA:SetToAlpha(0.55)
 
     f.dice = f:CreateTexture(nil, "OVERLAY")
     f.dice:SetTexture(DICE_TEXTURE)
@@ -114,12 +162,12 @@ local function CreateGameFrame()
     f.dice:Hide()
 
     f.status = W.Text(f, 12, C.muted, { justify = "CENTER" })
-    f.status:SetPoint("TOP", 0, -208)
+    f.status:SetPoint("TOP", 0, -236)
     f.status:SetWidth(296)
 
     -- pending: countdown
     f.timer = W.TimerBar(f, 296, ns.INVITE_TIMEOUT)
-    f.timer:SetPoint("TOP", 0, -250)
+    f.timer:SetPoint("TOP", 0, -278)
     f.timer.label:SetText("Challenge expires")
     f.timer:SetScript("OnUpdate", function(self)
         local g = S.game
@@ -128,7 +176,7 @@ local function CreateGameFrame()
 
     -- active: roll input
     f.input = W.Input(f, 296, 30, "")
-    f.input:SetPoint("TOP", 0, -234)
+    f.input:SetPoint("TOP", 0, -262)
     f.input:SetJustifyH("CENTER")
     f.input.placeholder:SetJustifyH("CENTER")
     f.input:SetMaxLetters(20)
@@ -149,16 +197,16 @@ local function CreateGameFrame()
 
     -- done: series line and milestones
     f.series = W.Text(f, 12, C.muted, { justify = "CENTER" })
-    f.series:SetPoint("TOP", 0, -236)
+    f.series:SetPoint("TOP", 0, -262)
     f.milestones = W.Text(f, 11, C.gold, { justify = "CENTER" })
-    f.milestones:SetPoint("TOP", 0, -256)
+    f.milestones:SetPoint("TOP", 0, -280)
     f.milestones:SetWidth(296)
 
     -- roll ladder
     f.ladderLabel = W.Text(f, 10, C.muted)
-    f.ladderLabel:SetPoint("TOPLEFT", 14, -278)
+    f.ladderLabel:SetPoint("TOPLEFT", 14, -306)
     f.ladder = W.Text(f, 13, C.text, { wrap = true })
-    f.ladder:SetPoint("TOPLEFT", 14, -294)
+    f.ladder:SetPoint("TOPLEFT", 14, -322)
     f.ladder:SetWidth(292)
     f.ladder:SetSpacing(4)
 
@@ -169,12 +217,37 @@ local function CreateGameFrame()
     f.statsBtn:SetPoint("BOTTOMRIGHT", -12, 12)
     f.cancel = W.Button(f, "Cancel challenge", 296, 26, "neutral", function() ns.Forfeit() end)
     f.cancel:SetPoint("BOTTOM", 0, 12)
-    f.rematch = W.Button(f, "Rematch", 140, 26, "primary", function() ns.Rematch() end)
-    f.rematch:SetPoint("BOTTOMLEFT", 12, 12)
-    f.closeBtn = W.Button(f, "Close", 140, 26, "neutral", function() f:Hide() end)
+    -- result screen: [Rematch][Double or nothing] over [Announce][Close]
+    f.rematch = W.Button(f, "Rematch", 144, 26, "neutral", function() ns.Rematch() end)
+    f.rematch:SetPoint("BOTTOMLEFT", 12, 44)
+    f.rematch:HookScript("OnEnter", function(self)
+        local g = S.game
+        if not g then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Rematch")
+        GameTooltip:AddLine(g.wager > 0 and ("Same stakes: %sg"):format(Num(g.wager)) or "Another friendly game", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    f.rematch:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    f.double = W.Button(f, "Double or nothing", 148, 26, "primary", function() ns.DoubleOrNothing() end)
+    f.double:SetPoint("BOTTOMRIGHT", -12, 44)
+    f.double:HookScript("OnEnter", function(self)
+        local g = S.game
+        if not g then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Double or nothing")
+        GameTooltip:AddLine(("Challenge %s again for %sg, twice this pot."):format(FirstName(g.opponent), Num(g.wager * 2)), 0.7, 0.7, 0.7, true)
+        local gold = ns.MyGold()
+        if gold < g.wager * 2 then
+            GameTooltip:AddLine(("You only have %sg."):format(Num(gold)), C.loss[1], C.loss[2], C.loss[3])
+        end
+        GameTooltip:Show()
+    end)
+    f.double:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    f.closeBtn = W.Button(f, "Close", 148, 26, "neutral", function() f:Hide() end)
     f.closeBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    f.announce = W.Button(f, "Announce", 96, 26, "neutral", function() ns.AnnounceResult() end)
-    f.announce:SetPoint("BOTTOM", 0, 12)
+    f.announce = W.Button(f, "Announce", 144, 26, "neutral", function() ns.AnnounceResult() end)
+    f.announce:SetPoint("BOTTOMLEFT", 12, 12)
     f.announce:SetScript("OnEnter", function(self)
         if self:IsEnabled() then self.bg:SetVertexColor(unpack(self.style.hi)) end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -212,6 +285,102 @@ local function PrepareMyTurn(g)
     end
 end
 
+-- Odds from what both players have SEEN: only revealed rolls count, so the bar
+-- never gives away a result that's still spinning. Returns your chance (0..1).
+local function MyWinChance(g)
+    if g.state == "done" then return g.won and 1 or 0 end
+    local n, roller = g.startMax, g.challenger
+    for i = #g.rolls, 1, -1 do
+        local r = g.rolls[i]
+        if r.revealed then
+            if r.roll == 1 then return SameName(r.who, S.me) and 0 or 1 end
+            n = r.roll
+            roller = SameName(r.who, S.me) and g.opponent or S.me
+            break
+        end
+    end
+    local rollerWins = 1 - ns.LoseChance(n)
+    return SameName(roller, S.me) and rollerWins or (1 - rollerWins)
+end
+
+local function Pct(p) return ("%d%%"):format(math.floor(p * 100 + 0.5)) end
+
+local function UpdateOdds(g)
+    local o = frame.odds
+    local p = MyWinChance(g)
+    local key = g.id .. ":" .. g.state
+    if o.gameKey ~= g.id then                      -- new game: jump, no deltas
+        o.gameKey, o.shown = g.id, p
+        o:Draw(p)
+        o.meDelta:SetText(""); o.themDelta:SetText("")
+    elseif o.target and math.abs(p - o.target) >= 0.005 and g.state ~= "done" then
+        local d = math.floor((p - o.target) * 100 + 0.5)
+        if d ~= 0 then
+            o.meDelta:SetText(W.Color(d > 0 and "win" or "loss", (d > 0 and "+" or "") .. d))
+            o.themDelta:SetText(W.Color(d < 0 and "win" or "loss", (d < 0 and "+" or "") .. (-d)))
+            local token = {}
+            o.deltaToken = token
+            C_Timer.After(2.5, function()
+                if o.deltaToken == token then o.meDelta:SetText(""); o.themDelta:SetText("") end
+            end)
+        end
+    end
+    o.target = p
+    o.meText:SetText(Pct(p))
+    o.themText:SetText(Pct(1 - p))
+    o.caption:SetText(g.state == "done" and "FINAL" or "CHANCE TO WIN")
+end
+
+-- "1% chance of a 1" from 100, "1 in 7" once it's close.
+local function OneChance(n)
+    if n <= 10 then return ("1 IN %d CHANCE OF A 1"):format(n) end
+    return ("%d%% CHANCE OF A 1"):format(math.max(1, math.floor(100 / n + 0.5)))
+end
+
+-- Close calls: 10 or less is tense (amber), 3 or less is critical (red).
+local TENSION_SOUNDS = { "UI_BATTLEGROUND_COUNTDOWN_TIMER", "ALARM_CLOCK_WARNING_3", "RAID_WARNING" }
+local function TensionLevel(g)
+    if not g or g.state ~= "active" then return 0 end
+    if g.max <= 3 then return 2 end
+    if g.max <= 10 then return 1 end
+    return 0
+end
+
+local function ClearTension()
+    local f = frame
+    f.bigPulse:Stop(); f.glowPulse:Stop()
+    f.big:SetAlpha(1); f.glow:SetAlpha(0)
+    f.trim:SetColor(C.accent[1], C.accent[2], C.accent[3], 0.45)
+    f.tension = 0
+end
+
+local function ApplyTension(g)
+    local f = frame
+    local level = ns.Setting("closeCallFx") and TensionLevel(g) or 0
+    if level == 0 then
+        if f.tension ~= 0 then ClearTension() end
+        return
+    end
+    local color = level == 2 and C.loss or C.warn
+    f.big:SetTextColor(unpack(color))
+    f.trim:SetColor(color[1], color[2], color[3], level == 2 and 1 or 0.8)
+    f.glow:SetVertexColor(unpack(color))
+    if f.tension ~= level then
+        local speed = level == 2 and 0.35 or 0.7
+        f.bigPulseA:SetDuration(speed); f.glowPulseA:SetDuration(speed)
+        f.bigPulse:Stop(); f.glowPulse:Stop()
+        f.bigPulse:Play(); f.glowPulse:Play()
+        -- one warning sound each time it gets worse
+        if level > (g.tensionHeard or 0) then
+            g.tensionHeard = level
+            for _, key in ipairs(TENSION_SOUNDS) do
+                if SOUNDKIT and SOUNDKIT[key] then ns.Sound(key); break end
+            end
+        end
+        f.tension = level
+    end
+end
+
 local function UpdateLadder()
     local f, g = frame, S.game
     local oppFirst = FirstName(g.opponent)
@@ -228,12 +397,12 @@ local function UpdateLadder()
         end
     end
     -- keep the most recent ones if it gets long
-    while #parts > 12 do table.remove(parts, 2); parts[2] = W.Color("muted", "...") end
+    while #parts > 10 do table.remove(parts, 2); parts[2] = W.Color("muted", "...") end
     f.ladder:SetText(table.concat(parts, W.Color("muted", "  >  ")))
 end
 
 local function ShowOnly(f, shown)
-    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "closeBtn", "announce" }) do
+    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "double", "closeBtn", "announce" }) do
         f[key]:SetShown(shown[key] == true)
     end
 end
@@ -251,10 +420,11 @@ local function Update()
     f.potLabel:SetShown(g.wager > 0)
     f.potBg:SetShown(g.wager > 0)
     UpdateLadder()
+    UpdateOdds(g)
     W.SetFont(f.big, 44, "OUTLINE", true)
     f.dice:Hide()
 
-    f.potLabel:SetText("POT")
+    f.potLabel:SetText(g.double and W.Color("loss", "DOUBLE OR NOTHING") or "POT")
     if g.state == "pending" then
         ShowOnly(f, { timer = true, cancel = true })
         f.me:SetActive(false); f.opp:SetActive(false)
@@ -269,9 +439,14 @@ local function Update()
         local mine = ns.IsMyTurn()
         f.me:SetActive(mine, "YOUR TURN")
         f.opp:SetActive(not mine and g.state == "active", "ROLLING")
-        f.rangeLabel:SetText("ROLL 1 TO")
         f.big:SetText(Num(g.max))
         f.big:SetTextColor(unpack(mine and C.gold or C.text))
+        local level = TensionLevel(g)
+        if level > 0 then
+            f.rangeLabel:SetText(W.Color(level == 2 and "loss" or "warn", "CLOSE CALL") .. "   " .. OneChance(g.max))
+        else
+            f.rangeLabel:SetText("ROLL 1 TO   " .. W.Color("muted", "(" .. OneChance(g.max):lower() .. ")"))
+        end
         if mine then
             f.status:SetText(W.Color("win", "Your turn!") .. "  Type the command below.")
             f.input:Enable()
@@ -290,9 +465,11 @@ local function Update()
 
     else -- done
         local canAnnounce = ns.Setting("announceResults")
-        ShowOnly(f, { series = true, milestones = true, rematch = true, closeBtn = true, announce = canAnnounce })
-        f.rematch:SetWidth(canAnnounce and 96 or 140)
-        f.closeBtn:SetWidth(canAnnounce and 96 or 140)
+        local canDouble = ns.CanDouble(g)
+        ShowOnly(f, { series = true, milestones = true, rematch = true, double = canDouble, closeBtn = true, announce = canAnnounce })
+        -- rows stay full width when a button is missing
+        f.rematch:SetWidth(canDouble and 144 or 296)
+        f.closeBtn:SetWidth(canAnnounce and 148 or 296)
         if g.announced then
             f.announce:SetLabel("Announced")
             f.announce:Disable()
@@ -323,6 +500,7 @@ local function Update()
         local lead = w > l and "You lead" or (w < l and (FirstName(opp) .. " leads") or "Series tied")
         f.series:SetText(("%s  %s-%s"):format(lead, W.Color("win", w), W.Color("loss", l)))
     end
+    ApplyTension(g)
     f:Show()
     if ns.IsMyTurn() then PrepareMyTurn(g) end
 end
@@ -360,6 +538,8 @@ local function RunNextReveal()
     f.input:Disable()
     f.input:SetPlaceholder("Rolling...")
     f.input:RefreshPlaceholder()
+    f.bigPulse:Stop(); f.big:SetAlpha(1)            -- the pulse would fight the flicker
+    f.tension = -1                                  -- re-applied once the result is in
     W.SetFont(f.big, 44, "OUTLINE", true)
     local duration = RevealTime()
     f.dice:SetShown(duration > 0)
@@ -384,6 +564,7 @@ local function RunNextReveal()
         -- Land on the real result.
         self:SetScript("OnUpdate", nil)
         e.revealed = true
+        if S.game then UpdateOdds(S.game) end        -- the bar moves the moment the number lands
         f.dice:Hide()
         f.dice:SetRotation(0)
         f.big:SetText(Num(e.roll))
@@ -486,6 +667,13 @@ local function ShowInvite(inv)
     f.name:SetText(Short(inv.from))
     f.pot:SetAmount(inv.wager)
     f.potBg:SetShown(inv.wager > 0)
+    if inv.double then
+        f.sub:SetText(W.Color("loss", "wants double or nothing!"))
+        f.pot.label:SetText(W.Color("loss", "DOUBLE OR NOTHING"))
+    else
+        f.sub:SetText("challenges you to a deathroll")
+        f.pot.label:SetText("FOR")
+    end
     f.announce:SetChecked(inv.announced or ns.Setting("announceChallenges"))
     f.start:SetText("Starting roll 1 - " .. Num(inv.max))
     local w, l, net = ns.HeadToHead(inv.from)
@@ -523,6 +711,8 @@ ns.OnSetting(function(key)
     if key == "scale" then
         W.ApplyScale(frame)
         W.ApplyScale(inviteFrame)
+    elseif key == "closeCallFx" then
+        if frame and frame:IsShown() and S.game and not frame.revealing then Update() end
     elseif key == "announceResults" then
         if frame and frame:IsShown() then Update() end
     elseif key == "autoFocus" or key == "prefillRoll" then

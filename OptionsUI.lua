@@ -105,6 +105,8 @@ local function BuildContent(parent, left, top)
     local minimap = Check(parent, "minimap", "Show minimap button",
         "Left-click: game or stats. Right-click: options. Drag to move it.")
     local sound = Check(parent, "sound", "Sounds", "Challenge, your turn, dice and result sounds.")
+    local closeCall = Check(parent, "closeCallFx", "Close-call effects",
+        "When the roll gets down to 10 or less: the number pulses, the frame turns amber then red, and a warning sound plays.")
     local tips = Check(parent, "tips", "Tips in chat", "Reminders like standing close together so both of you see every roll.")
     local scale = Choice(parent, "scale", "Window size", {
         { value = 0.9,  label = "90%",  width = 44 },
@@ -121,7 +123,7 @@ local function BuildContent(parent, left, top)
     Track("debug", debug)
 
     Stack(parent, left + COL_W + 20, top, {
-        { ui }, { minimap, 12 }, { sound, 6 }, { tips, 6 }, { scale, 8 },
+        { ui }, { minimap, 12 }, { sound, 6 }, { closeCall, 6 }, { tips, 6 }, { scale, 8 },
         { adv, 18 }, { debug, 12 },
     })
 end
@@ -131,7 +133,7 @@ end
 ---------------------------------------------------------------------------
 
 local function CreateOptionsFrame()
-    local f = W.Panel("GupsDeathrollerOptionsFrame", 2 * COL_W + 60, 440, "Gup's Deathroller options")
+    local f = W.Panel("GupsDeathrollerOptionsFrame", 2 * COL_W + 60, 486, "Gup's Deathroller options")
     f:SetPoint("CENTER", 0, 60)
     tinsert(UISpecialFrames, "GupsDeathrollerOptionsFrame")
 
@@ -187,7 +189,7 @@ local function RegisterBlizzardCategory()
     BuildContent(panel, 18, -56)
 
     local resetPos = W.Button(panel, "Reset window positions", 170, 24, "neutral", ResetPositions)
-    resetPos:SetPoint("TOPLEFT", 18, -440)
+    resetPos:SetPoint("TOPLEFT", 18, -486)
     local defaults = W.Button(panel, "Restore defaults", 130, 24, "neutral", RestoreDefaults)
     defaults:SetPoint("LEFT", resetPos, "RIGHT", 8, 0)
 

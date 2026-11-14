@@ -1,11 +1,10 @@
-## 1.0.0 - First public release
+## 1.1.0
 
-- Challenge a targeted player with `/dr`: choose your wager, see your record against them, and check they have a compatible version before you send.
-- Two-player deathrolls from 1-100, with every roll read from the game's own roll message.
-- Dice reveal: rolls stay out of chat until they land, on both screens.
-- Gold pot shown front and center in the game window and the challenge popup.
-- Stats window: overview, full searchable history (last 1,000 games) and debts.
-- Debt tracking with a trade-window banner and a one-click Put in button.
-- Optional announcements and milestones as emotes.
-- Options window plus a page under Options > AddOns.
-- Minimap button and add-on compartment entry.
+### New
+- **Chance to win.** A bar under the player cards shows each player's exact chance of winning from the current roll, with the change after every roll. It only moves once the dice land, so it never gives a result away.
+- **Chance of a 1.** The game window shows the odds that this roll is the losing 1: 1% from 100, "1 in 7" once it's close.
+- **Close calls.** When the roll gets down to 10 or less, the number pulses and the window's trim turns amber, then red at 3 or less, with a warning sound. You can turn this off in the options under Interface.
+- **Double or nothing.** After a game with gold on it, challenge the same player again for twice the pot. Their popup makes it clear what they're accepting, and the challenge and accept emotes say double or nothing when announcements are on.
+
+### Changed
+- The result screen's buttons are now two rows: Rematch and Double or nothing, then Announce and Close.

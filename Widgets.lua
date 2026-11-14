@@ -127,7 +127,7 @@ function W.Panel(name, width, height, title)
     W.Border(f)
     local inner = CreateFrame("Frame", nil, f)       -- brass inner trim
     inner:SetPoint("TOPLEFT", 1, -1); inner:SetPoint("BOTTOMRIGHT", -1, 1)
-    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
+    f.trim = W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
 
     local header = CreateFrame("Frame", nil, f)
     header:SetPoint("TOPLEFT", 1, -1)
