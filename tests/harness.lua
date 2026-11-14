@@ -67,6 +67,7 @@ function Methods:GetCenter() return 500, 500 end
 function Methods:GetEffectiveScale() return 1 end
 function Methods:GetStringHeight() return 24 end
 function Methods:EnableKeyboard(on) self._kb = on and true or false end
+function Methods:SetPropagateKeyboardInput(on) self._propagate = on end
 function Methods:IsKeyboardEnabled() return self._kb == true end
 -- rough text metrics so name fitting can be tested: ~0.55 em per character
 function Methods:SetFont(_, size) self._fontSize = size; return true end
@@ -222,8 +223,9 @@ local function Tick(seconds)
                 if w._scripts.OnUpdate and w:IsVisible() then w:Fire("OnUpdate", 0.05) end
             end
             -- the player keeps pressing keys (moving etc.), which lets held emotes go out
-            local kw = c.ns and c.ns.keyWatcher
-            if kw and kw._kb and c.autoKeys ~= false then kw:Fire("OnKeyDown", "W") end
+            -- the player presses Enter on the "Press Enter to post" bar when it shows
+            local bar = c.env and c.env.GupsDeathrollerEmotePrompt
+            if bar and bar:IsShown() and c.autoKeys ~= false then bar:Fire("OnKeyDown", "ENTER") end
         end
     end
 end
@@ -1040,37 +1042,53 @@ local ok, err = xpcall(function()
     A.target = nil
     A.env.GupsDeathrollerFrame.closeBtn:Fire("OnClick"); A.ns.ClearFinished()
 
-    print("== Forever: emotes need a key press")
+    print("== Forever: emotes need a key press (Enter bar)")
     A.autoKeys = false
+    local bar
     local n0 = #A.emotes
     A.target = nil
     A.env.SlashCmdList.GUPSDEATHROLLER("open 1"); Tick(0.1)
     A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.5)
-    check(#A.emotes == n0 and A.ns.state.game.state == "open", "clicking Post: emote held, challenge is open")
-    check(Logged(A, "goes out on your next key press"), "says it goes out on the next key press")
-    A.ns.keyWatcher:Fire("OnKeyDown", "W")
+    bar = A.env.GupsDeathrollerEmotePrompt
+    check(#A.emotes == n0 and A.ns.state.game.state == "open", "clicking Post: emote waits, challenge is open")
+    check(bar and bar:IsShown() and bar.preview:GetText():find("issues an open deathroll challenge for 1g!", 1, true) ~= nil,
+        "the Enter bar shows what will be posted")
+    bar:Fire("OnKeyDown", "W")
+    check(#A.emotes == n0 and bar:IsShown() and bar._propagate == true, "other keys pass through and post nothing")
+    bar:Fire("OnKeyDown", "ENTER")
     check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge for 1g! /roll 100 to accept.",
-        "next key press sends it: " .. tostring(A.emotes[#A.emotes]))
-    check(not A.ns.keyWatcher:IsKeyboardEnabled(), "stops listening to keys once nothing is waiting")
+        "Enter posts it: " .. tostring(A.emotes[#A.emotes]))
+    check(not bar:IsShown() and bar._propagate == false, "bar closes, and Enter doesn't also open chat")
     A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)   -- typed: the call-off goes out at once
-    check(A.emotes[#A.emotes] == "EMOTE: calls off the deathroll.", "a typed /dr command emotes at once")
+    check(A.emotes[#A.emotes] == "EMOTE: calls off the deathroll." and not bar:IsShown(), "a typed /dr command emotes at once, no bar")
     n0 = #A.emotes
     A.env.SlashCmdList.GUPSDEATHROLLER("open 2"); Tick(0.1)
     A.env.GupsDeathrollerChallengeFrame.input:Fire("OnEnterPressed"); Tick(0.1)
-    check(#A.emotes == n0 + 1 and A.emotes[#A.emotes]:find("for 2g!") ~= nil, "pressing Enter in the window emotes at once")
-    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
-    -- old held emotes don't go out late
+    check(#A.emotes == n0 + 1 and A.emotes[#A.emotes]:find("for 2g!") ~= nil and not bar:IsShown(),
+        "pressing Enter in the window emotes at once")
+    -- Esc skips; two waiting emotes show as 1 of 2
+    A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
     A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
     A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
-    A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(31)
+    check(bar:IsShown() and bar.count:GetText() == "1 of 2", "two waiting: shows 1 of 2")
     n0 = #A.emotes
-    A.ns.keyWatcher:Fire("OnKeyDown", "W"); A.ns.keyWatcher:Fire("OnKeyDown", "W")
-    check(#A.emotes == n0, "held emotes older than 30 s are dropped")
+    bar:Fire("OnKeyDown", "ESCAPE")
+    check(#A.emotes == n0 and bar:IsShown() and bar.count:GetText() == "", "Esc skips the first")
+    bar.close:Fire("OnClick")
+    check(not bar:IsShown() and #A.emotes == n0, "the x skips the rest")
+    -- unposted ones expire
+    A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
+    check(bar:IsShown(), "call-off waits too")
+    Tick(31)
+    check(not bar:IsShown(), "after 30 s the bar goes away")
+    bar:Fire("OnKeyDown", "ENTER")
+    check(#A.emotes == n0, "and nothing posts late")
     -- inside an instance a click is enough
     A.inInstance = true
     A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
     A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
-    check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge! /roll 100 to accept.", "in an instance: sent at once")
+    check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge! /roll 100 to accept." and not bar:IsShown(),
+        "in an instance: sent at once")
     A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
     A.inInstance, A.autoKeys = nil, nil
 

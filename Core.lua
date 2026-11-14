@@ -499,13 +499,13 @@ end
 -- Emotes. Since Forever 1.60.1 an add-on emote outside instances needs a hardware
 -- event, and on Forever a click on an add-on window doesn't count: only a key press
 -- does. So an emote is sent at once when we're handling a key press (a /dr command,
--- Enter in our windows, or inside an instance), and otherwise held and sent on your
--- next key press. If WoW blocks one even then, we stop trying until /reload rather
--- than pile up errors. Games never depend on an emote getting through.
-local lastEmote, lastLockdownNote, lastQueueNote = 0, 0, 0
+-- Enter in our windows) or inside an instance. After a click it waits in a small
+-- "Press Enter to post" bar (GameUI). If WoW blocks one even then, we stop trying
+-- until /reload rather than pile up errors. Games never depend on an emote.
+local lastEmote, lastLockdownNote = 0, 0
 local emoteBlocked, emoting, emoteWasBlocked = false, false, false
-local queue = {}                       -- { text, t } waiting for a key press
-local QUEUE_LIFETIME = 30              -- stale announcements are dropped
+local queue = {}                       -- { text, t } waiting for Enter
+ns.EMOTE_WAIT = 30                     -- unposted announcements are dropped after this
 
 -- Set while handling a key press (slash commands, Enter in our windows).
 ns.keyPress = false
@@ -517,6 +517,18 @@ function ns.WithKeyPress(fn, ...)
     if not ok then error(err, 0) end
 end
 
+local function PurgeStale()
+    while queue[1] and GetTime() - queue[1].t >= ns.EMOTE_WAIT do table.remove(queue, 1) end
+end
+
+-- What's waiting for Enter: the next emote, how many in all, and when it expires.
+function ns.PendingEmote()
+    PurgeStale()
+    local item = queue[1]
+    if not item then return nil, 0 end
+    return item.text, #queue, item.t + ns.EMOTE_WAIT
+end
+
 -- Called from the ADDON_ACTION_BLOCKED / _FORBIDDEN events, which fire during the call.
 function ns.OnActionBlocked(addon)
     if addon ~= ADDON_NAME or not emoting then return end
@@ -524,6 +536,7 @@ function ns.OnActionBlocked(addon)
     if not emoteBlocked then
         emoteBlocked = true
         wipe(queue)
+        UI("UpdateEmotePrompt")
         Print("WoW blocked an announcement from this add-on, so it won't post emotes again until you /reload. Your games aren't affected.")
     end
 end
@@ -540,24 +553,30 @@ local function SendNow(text)
     return ok
 end
 
--- Listens for the next key press (passing every key on) while emotes are waiting.
-local keyWatcher = CreateFrame("Frame")
-ns.keyWatcher = keyWatcher
-local function WatchKeys(on)
-    if InCombatLockdown and InCombatLockdown() then return end   -- keyboard setup is off-limits in combat
-    keyWatcher:EnableKeyboard(on)
-    if on then keyWatcher:SetPropagateKeyboardInput(true) end
+-- A key went down while the "Press Enter to post" bar is showing. Returns true if
+-- we used the key (Enter posts, Esc skips); every other key passes through.
+function ns.EmotePromptKey(key)
+    PurgeStale()
+    if not queue[1] then UI("UpdateEmotePrompt"); return false end
+    if key == "ENTER" or key == "NUMPADENTER" then
+        local item = table.remove(queue, 1)        -- one emote per key press
+        if not emoteBlocked then SendNow(item.text) end
+    elseif key == "ESCAPE" then
+        table.remove(queue, 1)
+    else
+        return false
+    end
+    UI("UpdateEmotePrompt")
+    return true
 end
-keyWatcher:SetScript("OnKeyDown", function()
-    -- one emote per key press (one protected action per hardware event)
-    while queue[1] and GetTime() - queue[1].t > QUEUE_LIFETIME do table.remove(queue, 1) end
-    local item = table.remove(queue, 1)
-    if item and not emoteBlocked then SendNow(item.text) end
-    if not queue[1] then WatchKeys(false) end
-end)
 
--- Returns true if sent or queued (second value "queued"), or false plus a reason:
--- "combat", "lockdown", "blocked".
+function ns.SkipEmotes()
+    wipe(queue)
+    UI("UpdateEmotePrompt")
+end
+
+-- Returns true if sent or waiting for Enter (second value "queued"), or false plus a
+-- reason: "combat", "lockdown", "blocked".
 local function Emote(text)
     if emoteBlocked then return false, "blocked" end
     if InCombatLockdown and InCombatLockdown() then return false, "combat" end
@@ -568,18 +587,14 @@ local function Emote(text)
         end
         return false, "lockdown"
     end
-    local inInstance = IsInInstance and IsInInstance()
-    if ns.keyPress or inInstance then
+    if ns.keyPress or (IsInInstance and IsInInstance()) then
         local ok = SendNow(text)
         return ok, (not ok) and "blocked" or nil
     end
     queue[#queue + 1] = { text = text, t = GetTime() }
     lastEmote = GetTime()
-    WatchKeys(true)
-    if GetTime() - lastQueueNote > 60 then
-        lastQueueNote = GetTime()
-        Print("WoW only lets add-ons post emotes after a key press, so the announcement goes out on your next key press.")
-    end
+    UI("UpdateEmotePrompt")
+    C_Timer.After(ns.EMOTE_WAIT + 0.05, function() UI("UpdateEmotePrompt") end)   -- expire
     return true, "queued"
 end
 

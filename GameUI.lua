@@ -744,6 +744,118 @@ ns.OnSetting(function(key)
     end
 end)
 
+------------------------------------------------------------------------
+-- "Press Enter to post" bar. On Forever an add-on can only emote after a key
+-- press (a click doesn't count), so after a click the announcement waits here.
+-- Only Enter and Esc are taken; every other key keeps working as normal.
+------------------------------------------------------------------------
+local prompt
+
+local function KeyCap(parent, label)
+    local cap = CreateFrame("Frame", nil, parent)
+    cap:SetHeight(18)
+    local bg = W.Tex(cap, C.header, "BACKGROUND")
+    bg:SetAllPoints()
+    W.Border(cap, { C.accent[1], C.accent[2], C.accent[3], 0.8 })
+    cap.text = W.Text(cap, 10, C.gold, { flags = "OUTLINE" })
+    cap.text:SetPoint("CENTER", 0, 0)
+    cap.text:SetText(label)
+    cap:SetWidth(cap.text:GetStringWidth() + 14)
+    return cap
+end
+
+local function CreatePrompt()
+    local f = CreateFrame("Frame", "GupsDeathrollerEmotePrompt", UIParent)
+    f:SetSize(320, 84)
+    f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    f.bg = W.Tex(f, C.bg)
+    f.bg:SetAllPoints()
+    W.Border(f)
+    local inner = CreateFrame("Frame", nil, f)
+    inner:SetPoint("TOPLEFT", 1, -1); inner:SetPoint("BOTTOMRIGHT", -1, 1)
+    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
+
+    f.caption = W.Text(f, 10, C.muted)
+    f.caption:SetPoint("TOPLEFT", 12, -9)
+    f.caption:SetText("ANNOUNCE TO PEOPLE NEARBY")
+    f.count = W.Text(f, 10, C.muted, { justify = "RIGHT" })
+    f.count:SetPoint("TOPRIGHT", -28, -9)
+
+    f.close = CreateFrame("Button", nil, f)
+    f.close:SetSize(16, 16)
+    f.close:SetPoint("TOPRIGHT", -6, -6)
+    f.close.text = W.Text(f.close, 12, C.muted)
+    f.close.text:SetPoint("CENTER")
+    f.close.text:SetText("x")
+    f.close:SetScript("OnClick", function() ns.SkipEmotes() end)   -- skipping needs no key press
+    f.close:SetScript("OnEnter", function(self) self.text:SetTextColor(unpack(C.text)) end)
+    f.close:SetScript("OnLeave", function(self) self.text:SetTextColor(unpack(C.muted)) end)
+
+    f.preview = W.Text(f, 12, C.text, { justify = "LEFT" })
+    f.preview:SetPoint("TOPLEFT", 12, -24)
+    f.preview:SetWidth(296)
+    f.preview:SetMaxLines(2)
+
+    f.enter = KeyCap(f, "ENTER")
+    f.enter:SetPoint("BOTTOMLEFT", 12, 10)
+    f.enterText = W.Text(f, 11, C.text)
+    f.enterText:SetPoint("LEFT", f.enter, "RIGHT", 6, 0)
+    f.enterText:SetText("Post")
+    f.esc = KeyCap(f, "ESC")
+    f.esc:SetPoint("LEFT", f.enterText, "RIGHT", 16, 0)
+    f.escText = W.Text(f, 11, C.muted)
+    f.escText:SetPoint("LEFT", f.esc, "RIGHT", 6, 0)
+    f.escText:SetText("Skip")
+
+    -- time left before it's dropped: a thin brass line along the bottom
+    f.timeBar = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.8 }, "ARTWORK")
+    f.timeBar:SetHeight(2)
+    f.timeBar:SetPoint("BOTTOMLEFT", 1, 1)
+    f:SetScript("OnUpdate", function(self)
+        if not self.expires then return end
+        local left = self.expires - GetTime()
+        if left <= 0 then ns.UI.UpdateEmotePrompt(); return end
+        self.timeBar:SetWidth(math.max(1, 318 * left / ns.EMOTE_WAIT))
+    end)
+
+    -- keys: take Enter and Esc, pass everything else on
+    f:EnableKeyboard(true)
+    f:SetPropagateKeyboardInput(true)
+    f:SetScript("OnKeyDown", function(self, key)
+        if InCombatLockdown and InCombatLockdown() then return end   -- can't change key handling in combat
+        local used = ns.EmotePromptKey(key)
+        self:SetPropagateKeyboardInput(not used)
+    end)
+    f:Hide()
+    return f
+end
+
+local function UpdateEmotePrompt()
+    local text, count, expires = ns.PendingEmote()
+    if not text then
+        if prompt then prompt:Hide() end
+        return
+    end
+    prompt = prompt or CreatePrompt()
+    prompt.preview:SetText(W.Color("muted", Short(S.me or "You")) .. " " .. text)
+    prompt.count:SetText(count > 1 and ("1 of %d"):format(count) or "")
+    prompt.expires = expires
+    prompt:ClearAllPoints()
+    if frame and frame:IsShown() then
+        prompt:SetPoint("TOP", frame, "BOTTOM", 0, -6)
+    else
+        prompt:SetPoint("TOP", UIParent, "TOP", 0, -160)
+    end
+    prompt:SetScale(ns.Setting("scale") or 1)
+    if not prompt:IsShown() then
+        prompt:Show()
+        ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+    end
+end
+
+ns.UI.UpdateEmotePrompt = UpdateEmotePrompt
 ns.UI.Update     = Update
 ns.UI.Reveal     = Reveal
 ns.UI.ShowInvite = ShowInvite

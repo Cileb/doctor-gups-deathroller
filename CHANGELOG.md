@@ -1,6 +1,6 @@
 ## 1.3.1
 
-- **Fix: announcements work again on WoW Forever.** Since Forever 1.60.1, add-ons can only post emotes after a key press, and a click on an add-on window doesn't count. Announcements now go out at once when you type a `/dr` command or press Enter in the window. After a click, they go out on your next key press (any key, such as moving). Held announcements are dropped after 30 seconds, so they never post late.
+- **Fix: announcements work again on WoW Forever.** Since Forever 1.60.1, add-ons can only post emotes after a key press, and a click on an add-on window doesn't count. Announcements now go out at once when you type a `/dr` command or press Enter in the wager window. After a click, a small bar shows what will be posted: press **Enter** to post it or **Esc** to skip it. Every other key keeps working as normal. Unposted announcements are dropped after 30 seconds, so nothing posts late.
 
 ## 1.3.0
 
