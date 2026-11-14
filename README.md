@@ -6,18 +6,14 @@ Download it from [CurseForge](https://www.curseforge.com/wow/addons) (project 18
 
 ## Releasing a new version
 
-1. Add the new version's notes to the top of `CHANGELOG.md`. Only the newest section is shown on CurseForge, so replace the old one.
-2. Commit and push.
-3. Tag the commit and push the tag:
+1. Put the new version's notes in `CHANGELOG.md` (only the newest version's notes; this file becomes the CurseForge changelog) and push to `main`.
+2. On GitHub, open **Actions > Release > Run workflow**, type the version (for example `v1.1.1`) and click **Run workflow**.
 
-   ```
-   git tag v1.0.1
-   git push origin v1.0.1
-   ```
+The workflow runs the tests, tags the newest commit on `main` with that version, builds `DoctorGupsDeathroller-v1.1.1.zip`, uploads it to CurseForge and attaches it to a GitHub release. The version becomes the one shown in game.
 
-The **Release** workflow runs the tests, then builds `DoctorGupsDeathroller-v1.0.1.zip`, uploads it to CurseForge and attaches it to a GitHub release. The tag becomes the version shown in game.
+Versions with `-alpha` or `-beta` in them (for example `v1.2.0-beta1`) are uploaded as alpha or beta files.
 
-Tags with `alpha` or `beta` in them (for example `v1.1.0-beta1`) are uploaded as alpha or beta files.
+You can also push a tag yourself instead: `git tag v1.1.1 && git push origin v1.1.1`.
 
 ## Tests
 

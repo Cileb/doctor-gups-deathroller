@@ -1,13 +1,22 @@
-# Push a tag like v1.0.1 and this builds the zip and uploads it to CurseForge
-# (project 1803451, read from the TOC) and to GitHub Releases.
+# Releases a version to CurseForge (project 1803451, read from the TOC) and GitHub Releases.
+#
+# Two ways to start it:
+#   * Actions tab > Release > "Run workflow", type the version (e.g. v1.1.0). It tags the
+#     newest commit on main with that version, then packages and uploads it.
+#   * Or push a tag yourself:  git tag v1.1.0 && git push origin v1.1.0
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, like v1.1.0 (add -beta1 or -alpha1 for a test build)"
+        required: true
 
 permissions:
-  contents: write   # lets the packager create the GitHub release
+  contents: write   # create the tag and the GitHub release
 
 jobs:
   test:
@@ -32,4 +41,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Run-workflow button: check the version, then tag this commit with it.
+      - name: Tag the release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "::error::Version must look like v1.1.0 or v1.2.0-beta1 (got '$VERSION')"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::$VERSION has already been released"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Doctor Gup's Deathroller $VERSION"
+          # A tag pushed with GITHUB_TOKEN doesn't start this workflow again.
+          git push origin "$VERSION"
+
       - uses: BigWigsMods/packager@v2
