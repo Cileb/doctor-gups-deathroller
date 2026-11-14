@@ -151,7 +151,7 @@ end
 local function Show(target, wager)
     if not frame then Create() end
     frame.target = target
-    frame.name:SetText(Short(target))
+    W.FitText(frame.name, Short(target), 280, 22, 14, { flags = "OUTLINE", title = true, fallback = FirstName(target) })
     local w, l, net = ns.HeadToHead(target)
     if w + l == 0 then
         frame.h2h:SetText(("You haven't played %s before"):format(FirstName(target)))

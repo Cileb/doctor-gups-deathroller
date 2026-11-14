@@ -30,8 +30,7 @@ local function PlayerCard(parent, label, nameColor)
     card.label:SetPoint("TOPLEFT", 10, -9)
     card.label:SetText(label)
     card.name = W.Text(card, 15, nameColor, { title = true })
-    card.name:SetPoint("TOPLEFT", 10, -24)
-    card.name:SetPoint("RIGHT", -8, 0)
+    card.name:SetPoint("TOPLEFT", 10, -24)       -- width set by W.FitText
     card.tag = W.Text(card, 10, C.accent, { justify = "RIGHT" })
     card.tag:SetPoint("TOPRIGHT", -8, -9)
 
@@ -413,8 +412,9 @@ local function Update()
     if f.revealing then f:Show(); return end          -- the dice animation owns the window
 
     local opp = Short(g.opponent)
-    f.me.name:SetText(Short(S.me))
-    f.opp.name:SetText(opp)
+    -- cards are narrow: shrink long names, then fall back to the first name
+    W.FitText(f.me.name, Short(S.me), 118, 15, 11, { title = true, fallback = FirstName(S.me) })
+    W.FitText(f.opp.name, opp, 118, 15, 11, { title = true, fallback = FirstName(opp) })
     f.pot:SetAmount(g.wager)
     f.potLabel:SetShown(g.wager > 0)
     f.potBg:SetShown(g.wager > 0)
@@ -664,7 +664,7 @@ end
 local function ShowInvite(inv)
     if not inviteFrame then CreateInviteFrame() end
     local f = inviteFrame
-    f.name:SetText(Short(inv.from))
+    W.FitText(f.name, Short(inv.from), 280, 22, 14, { flags = "OUTLINE", title = true, fallback = FirstName(inv.from) })
     f.pot:SetAmount(inv.wager)
     f.potBg:SetShown(inv.wager > 0)
     if inv.double then

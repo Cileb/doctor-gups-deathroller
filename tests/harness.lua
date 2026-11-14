@@ -66,6 +66,13 @@ function Methods:SetWidth(w) self._w = w end
 function Methods:GetCenter() return 500, 500 end
 function Methods:GetEffectiveScale() return 1 end
 function Methods:GetStringHeight() return 24 end
+-- rough text metrics so name fitting can be tested: ~0.55 em per character
+function Methods:SetFont(_, size) self._fontSize = size; return true end
+function Methods:GetUnboundedStringWidth() return self:GetStringWidth() end
+function Methods:GetStringWidth()
+    local t = (self._text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    return #t * (self._fontSize or 12) * 0.55
+end
 function Methods:SetScale(v) self._scale = v end
 function Methods:Stop() end
 
@@ -875,6 +882,19 @@ local ok, err = xpcall(function()
     Check(B, A)
     check(Notices(B) == b0 + 2, "development copies (no version number) never nag")
     A.ns.VERSION, B.ns.VERSION = "0.9.1", "0.9.1"
+
+    print("== long names fit")
+    local W = A.ns.W
+    local fs = A.env.GupsDeathrollerFrame.opp.name
+    W.FitText(fs, "Meudayr Darkpaw", 118, 15, 11, { title = true, fallback = "Meudayr" })
+    check(fs:GetText() == "Meudayr Darkpaw" and fs:GetStringWidth() <= 118, "slightly long: shrinks the font to keep the full name (size " .. fs._fontSize .. ")")
+    W.FitText(fs, "Bartholomew Stormrider", 118, 15, 11, { title = true, fallback = "Bartholomew" })
+    check(fs:GetText() == "Bartholomew" and fs._fontSize == 15, "too long even when shrunk: first name only, full size")
+    W.FitText(fs, "Al Stormrider", 118, 15, 11, { title = true, fallback = "Al" })
+    check(fs:GetText() == "Al Stormrider" and fs._fontSize == 15, "a short name stays at full size")
+    local big = A.env.GupsDeathrollerChallengeFrame.name
+    W.FitText(big, "Bartholomew Thunderstrike", 280, 22, 14, { flags = "OUTLINE", title = true, fallback = "Bartholomew" })
+    check(big:GetText() == "Bartholomew Thunderstrike" and big:GetStringWidth() <= 280, "wager window shrinks a long full name to fit")
 
     print("== coin flip for who rolls first")
     local function Duel(flip)

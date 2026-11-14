@@ -63,6 +63,26 @@ function W.SetFont(fs, size, flags, title)
     end
 end
 
+-- Show text in one line no wider than maxWidth: step the font down from size to minSize,
+-- then try the fallback (e.g. the first name), and as a last resort let the width clip it.
+local function TextWidth(fs)
+    return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+end
+
+function W.FitText(fs, text, maxWidth, size, minSize, opts)
+    opts = opts or {}
+    fs:SetWidth(maxWidth)
+    local function Try(t)
+        for s = size, minSize, -1 do
+            W.SetFont(fs, s, opts.flags, opts.title)
+            fs:SetText(t)
+            if TextWidth(fs) <= maxWidth then return true end
+        end
+    end
+    if Try(text) then return end
+    if opts.fallback and opts.fallback ~= text and Try(opts.fallback) then return end
+end
+
 function W.Text(parent, size, color, opts)
     opts = opts or {}
     local fs = parent:CreateFontString(nil, opts.layer or "OVERLAY")
