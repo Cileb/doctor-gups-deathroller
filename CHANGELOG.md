@@ -1,3 +1,7 @@
+## 1.2.1
+
+- **Fix: no more ADDON_ACTION_BLOCKED errors from announcements.** Some clients and areas don't let add-ons post emotes. The add-on now checks first and skips them there. If WoW blocks one anyway, it tells you once and stops trying until /reload, instead of raising an error every time. Games are never affected.
+
 ## 1.2.0
 
 - **Coin flip for who rolls first.** The challenger no longer always starts: a coin flip picks who rolls first, and both players are told the result. If the challenger is still on 1.1.x, the challenger rolls first as before.

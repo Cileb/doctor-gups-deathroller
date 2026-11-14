@@ -896,6 +896,47 @@ local ok, err = xpcall(function()
     W.FitText(big, "Bartholomew Thunderstrike", 280, 22, 14, { flags = "OUTLINE", title = true, fallback = "Bartholomew" })
     check(big:GetText() == "Bartholomew Thunderstrike" and big:GetStringWidth() <= 280, "wager window shrinks a long full name to fit")
 
+    print("== WoW refusing emotes")
+    local function Logged(c, text)
+        for i = #c.logs, 1, -1 do if c.logs[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    A.ns.SetSetting("announceChallenges", true)
+    -- chat lockdown (some content): don't even try, just say announcements are paused
+    B.env.C_ChatInfo.InChatMessagingLockdown = function() return true end
+    local sends = 0
+    local realSendB = B.env.SendChatMessage
+    B.env.SendChatMessage = function(...) sends = sends + 1; return realSendB(...) end
+    Tick(25)
+    A.target = B.name
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge 0"); GoChallenge(A); Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    check(sends == 0 and B.ns.state.game.state == "active", "lockdown: no emote attempted, game still starts")
+    check(Logged(B, "Announcements are paused here"), "lockdown: says announcements are paused")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.5)
+    B.env.C_ChatInfo.InChatMessagingLockdown = nil
+    -- a client where WoW blocks the emote outright (the BugSack report): stop trying
+    B.env.SendChatMessage = function()
+        sends = sends + 1
+        B.fire("ADDON_ACTION_BLOCKED", "DoctorGupsDeathroller", "UNKNOWN()")
+    end
+    Tick(25)
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge 0"); GoChallenge(A); Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    check(sends == 1 and B.ns.state.game.state == "active", "blocked: one attempt, game still starts")
+    check(Logged(B, "won't post emotes again until you /reload"), "blocked: explains once")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.5)
+    Tick(25)
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge 0"); GoChallenge(A); Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    check(sends == 1, "blocked: no more attempts this session, so no more errors")
+    -- other add-ons' blocked actions don't count
+    A.fire("ADDON_ACTION_BLOCKED", "SomeOtherAddon", "UNKNOWN()")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.5)
+    B.env.SendChatMessage = realSendB
+    A.target = nil
+    A.env.GupsDeathrollerFrame.closeBtn:Fire("OnClick"); A.ns.ClearFinished()
+
     print("== coin flip for who rolls first")
     local function Duel(flip)
         B.ns.CoinFlip = function() return flip end
