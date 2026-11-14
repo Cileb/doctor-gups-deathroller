@@ -18,6 +18,8 @@ ns.PROTO          = 3             -- bump when the message format changes
 ns.VERSION        = "?"           -- from the TOC, set on ADDON_LOADED
 ns.START_ROLL     = 100           -- every deathroll starts at 1-100
 ns.INVITE_TIMEOUT = 60            -- seconds to answer a challenge
+ns.OPEN_TIMEOUT   = 60            -- seconds for someone to /roll 100 on an open challenge
+ns.STALL_TIME     = 120           -- a player without the add-on this quiet can be ended with no result
 ns.HISTORY_SIZE   = 1000          -- games kept for the stats window
 ns.MAX_WAGER      = 9999999       -- the wager box allows 7 digits
 
@@ -245,6 +247,10 @@ function ns.IsGameRollLine(msg)
     if g.state == "active" and lo == 1 and hi == g.max and SameName(who, g.turn) then
         return true
     end
+    if g.state == "open" and lo == 1 and hi == g.max and not SameName(who, S.me)
+        and (not g.only or SameName(who, g.only)) then
+        return true                                          -- someone taking an open challenge
+    end
     -- after our handler processed it (chat frames may run either side of us)
     for i = #g.rolls, math.max(1, #g.rolls - 1), -1 do
         local r = g.rolls[i]
@@ -353,6 +359,7 @@ local function RecordResult(g)
         t = time(), opp = opp, won = g.won, wager = g.wager,
         start = g.startMax, rolls = #g.rolls, reason = g.reason,
         seq = EncodeRolls(g.rolls),
+        noAddon = g.noAddon or nil,                          -- played in chat, they had no add-on
     })
     while #DB.history > ns.HISTORY_SIZE do table.remove(DB.history) end
 
@@ -419,6 +426,24 @@ local function HandleRoll(who, roll, lo, hi, verified, rawText)
         return
     end
 
+    -- Open (chat) challenge: the first fitting /roll 100 from someone else accepts it
+    -- and is their first roll. Only rolls the server printed count.
+    if g.state == "open" then
+        if not verified or lo ~= 1 or hi ~= g.max then return end
+        if SameName(who, S.me) then
+            Print(("Your own roll doesn't count. Wait for %s to /roll %d."):format(
+                g.only and Short(g.only) or "someone", g.max))
+            return
+        end
+        if g.only and not SameName(who, g.only) then
+            Debug(("open roll ignored: waiting for %s, not %s"):format(g.only, who))
+            return
+        end
+        g.opponent, g.turn, g.state = who, who, "active"
+        Print(("%s accepted your challenge! Their roll comes first."):format(Short(who)))
+        Sound("READY_CHECK")
+    end
+
     if g.state ~= "active" then Debug("roll ignored: game is " .. g.state); return end
     local isMe = SameName(who, S.me)
     if not isMe and not SameName(who, g.opponent) then
@@ -438,7 +463,7 @@ local function HandleRoll(who, roll, lo, hi, verified, rawText)
 
     local entry = { who = who, roll = roll, max = hi, verified = verified, t = GetTime() }
     table.insert(g.rolls, entry)
-    if isMe and verified then
+    if isMe and verified and not g.noAddon then
         Send(g.opponent, "ROLL", g.id, roll, hi)        -- backup in case they can't see chat
     end
 
@@ -456,6 +481,10 @@ local function HandleRoll(who, roll, lo, hi, verified, rawText)
             EndGame(who, "roll")
         else
             if not isMe then Sound("IG_MAINMENU_OPTION_CHECKBOX_ON") end   -- your turn
+            if isMe and g.noAddon then
+                -- they might wander off: let the window offer to end it once they've gone quiet
+                C_Timer.After(ns.STALL_TIME + 0.5, function() if S.game == g then UI("Update") end end)
+            end
             UI("Update")
         end
     end
@@ -525,6 +554,12 @@ function ns.AnnounceResult()
     UI("Update")
 end
 
+local function ProximityTip()
+    if ns.Setting("tips") and not IsInGroup() then
+        Print("Tip: stand near each other or group up, so both of you can see every roll in chat.")
+    end
+end
+
 -- opts.double: this is a double-or-nothing rematch (shown to the other player)
 function ns.StartChallenge(target, wager, opts)
     local max = ns.START_ROLL
@@ -564,6 +599,58 @@ function ns.StartChallenge(target, wager, opts)
     end)
 end
 
+-- Chat challenges, for players without the add-on: your character emotes the challenge
+-- and they accept by typing /roll 100, which is also their first roll. No coin flip:
+-- the other side can't take part in one. only = one named player (Challenge in chat,
+-- rematches), nil = an open challenge anyone nearby can take.
+function ns.StartOpenChallenge(wager, only, opts)
+    local max = ns.START_ROLL
+    if S.game and S.game.state ~= "done" then
+        Print("You're already in a deathroll. Finish it or /dr forfeit first.")
+        return
+    end
+    if only and SameName(only, S.me) then Print("You can't deathroll yourself."); return end
+    wager = math.max(0, math.min(ns.MAX_WAGER, math.floor(tonumber(wager) or 0)))
+    local double = opts and opts.double or nil
+
+    local line
+    if double then
+        line = ("goes double or nothing against %s for %sg! %s, /roll %d to accept."):format(
+            Short(only), Num(wager), FirstName(only), max)
+    elseif only then
+        line = ("challenges %s to a deathroll%s! %s, /roll %d to accept."):format(
+            Short(only), WagerText(wager, " for %sg"), FirstName(only), max)
+    else
+        line = ("issues an open deathroll challenge%s! /roll %d to accept."):format(WagerText(wager, " for %sg"), max)
+    end
+    if not Emote(line) then Print("Couldn't post the challenge right now (in combat?)."); return end
+
+    local g = {
+        id = NewId(), opponent = only, only = only, challenger = S.me, noAddon = true,
+        max = max, startMax = max, wager = wager, rolls = {}, state = "open",
+        expires = GetTime() + ns.OPEN_TIMEOUT, double = double,
+    }
+    S.game = g
+    if only then
+        Print(("Challenge posted. %s has %d seconds to type /roll %d, and that roll comes first."):format(
+            Short(only), ns.OPEN_TIMEOUT, max))
+    else
+        Print(("Open challenge posted. The first player nearby to type /roll %d in the next %d seconds is your opponent, and that roll comes first. They don't need the add-on."):format(
+            max, ns.OPEN_TIMEOUT))
+    end
+    ProximityTip()
+    UI("Update")
+
+    C_Timer.After(ns.OPEN_TIMEOUT, function()
+        if S.game == g and g.state == "open" then
+            Print(only and ("%s didn't /roll %d in time."):format(Short(only), max)
+                or "No one took your open challenge.")
+            S.game = nil
+            UI("Update")
+        end
+    end)
+end
+
 -- Open the wager window for a player (from /dr with a target, or /dr challenge Name).
 function ns.OpenChallenge(target, wager)
     if S.game and S.game.state ~= "done" then
@@ -571,8 +658,8 @@ function ns.OpenChallenge(target, wager)
         UI("Update")
         return
     end
-    if SameName(target, S.me) then Print("You can't deathroll yourself."); return end
-    UI("ShowChallengeSetup", target, math.max(0, math.floor(tonumber(wager) or 0)))
+    if target and SameName(target, S.me) then Print("You can't deathroll yourself."); return end
+    UI("ShowChallengeSetup", target, math.max(0, math.floor(tonumber(wager) or 0)))   -- nil target = open challenge
 end
 
 -- Your gold, in whole gold pieces.
@@ -582,7 +669,9 @@ end
 
 function ns.Rematch()
     local g = S.game
-    if g and g.state == "done" then ns.StartChallenge(g.opponent, g.wager) end
+    if not (g and g.state == "done") then return end
+    if g.noAddon then ns.StartOpenChallenge(g.wager, g.opponent)
+    else ns.StartChallenge(g.opponent, g.wager) end
 end
 
 -- Same opponent, twice the pot. Only for games that had gold on them.
@@ -592,7 +681,9 @@ end
 
 function ns.DoubleOrNothing()
     local g = S.game
-    if ns.CanDouble(g) then ns.StartChallenge(g.opponent, g.wager * 2, { double = true }) end
+    if not ns.CanDouble(g) then return end
+    if g.noAddon then ns.StartOpenChallenge(g.wager * 2, g.opponent, { double = true })
+    else ns.StartChallenge(g.opponent, g.wager * 2, { double = true }) end
 end
 
 local function CancelChallenge()
@@ -609,20 +700,44 @@ function ns.Forfeit()
     local g = S.game
     if not g then return end
     if g.state == "pending" then CancelChallenge(); return end
+    if g.state == "open" then
+        Emote("calls off the deathroll.")             -- people saw the challenge, so say so
+        Print("Challenge cancelled.")
+        S.game = nil
+        UI("Update")
+        return
+    end
     if g.state ~= "active" then return end
+    if g.noAddon then
+        if ns.IsStalled(g) then ns.EndWithoutResult(); return end
+        EndGame(S.me, "forfeit")
+        ns.AnnounceResult()                            -- they can only find out from chat
+        return
+    end
     Send(g.opponent, "FORF", g.id)
     EndGame(S.me, "forfeit")
+end
+
+-- A chat game where the other player hasn't rolled for a while.
+function ns.IsStalled(g)
+    g = g or S.game
+    if not (g and g.noAddon and g.state == "active") or SameName(g.turn, S.me) then return false end
+    local last = g.rolls[#g.rolls]
+    return last ~= nil and GetTime() - last.t >= ns.STALL_TIME
+end
+
+function ns.EndWithoutResult()
+    local g = S.game
+    if not g then return end
+    Emote(("calls off the deathroll with %s."):format(Short(g.opponent)))
+    Print(("Ended with no result: %s stopped rolling."):format(Short(g.opponent)))
+    S.game = nil
+    UI("Update")
 end
 
 -- Clear a finished game (the window was closed).
 function ns.ClearFinished()
     if S.game and S.game.state == "done" then S.game = nil end
-end
-
-local function ProximityTip()
-    if ns.Setting("tips") and not IsInGroup() then
-        Print("Tip: stand near each other or group up, so both of you can see every roll in chat.")
-    end
 end
 
 -- true = the accepting player rolls first (its own function so tests can pin it)
@@ -939,6 +1054,7 @@ local function Help()
     Print("commands")
     print("   /dr (or /gup)  - with a player targeted: challenge them (choose your wager)")
     print("   /dr challenge First Last  - challenge someone who isn't targeted")
+    print("   /dr open [gold]  - open challenge: the first player nearby to /roll 100 takes it (no add-on needed)")
     print("   On your turn, type /roll N in the window's box (or in chat) and press Enter.")
     print("   /dr forfeit   - give up / cancel your challenge")
     print("   /dr show      - reopen the game window")
@@ -974,6 +1090,8 @@ SlashCmdList.GUPSDEATHROLLER = function(input)
         end
         if not target then Print("Target a player and type /dr, or use /dr challenge First Last."); return end
         ns.OpenChallenge(target, wager)
+    elseif cmd == "open" then
+        ns.OpenChallenge(nil, tonumber(((args[2] or ""):gsub("[gG]$", ""))))
     elseif cmd == "forfeit" or cmd == "ff" or cmd == "cancel" then
         ns.Forfeit()
     elseif cmd == "show" then

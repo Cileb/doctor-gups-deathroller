@@ -286,6 +286,15 @@ local function CreateStatsFrame()
             end)
         end
     end)
+    f.open = W.Button(f, "Open challenge", 120, 24, "primary", function() ns.OpenChallenge(nil) end)
+    f.open:SetPoint("LEFT", f.reset, "RIGHT", 8, 0)
+    f.open:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Open challenge")
+        GameTooltip:AddLine("Anyone nearby can take it by typing /roll 100. They don't need the add-on.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    f.open:HookScript("OnLeave", function() GameTooltip:Hide() end)
     f.note = W.Text(f, 10, C.muted, { justify = "RIGHT" })
     f.note:SetPoint("BOTTOMRIGHT", -14, 18)
     f.note:SetText(("Keeps your last %s games"):format(Num(ns.HISTORY_SIZE)))
@@ -354,7 +363,8 @@ RefreshHistory = function()
                 cells = {
                     date("%m/%d  %H:%M", h.t),
                     h.won and W.Color("win", "WIN") or W.Color("loss", "LOSS"),
-                    W.Color("opp", Short(h.opp)) .. (h.reason == "forfeit" and W.Color("muted", "  forfeit") or ""),
+                    W.Color("opp", Short(h.opp)) .. (h.reason == "forfeit" and W.Color("muted", "  forfeit") or "")
+                        .. (h.noAddon and W.Color("muted", "  no add-on") or ""),
                     tostring(h.rolls or "-"),
                     wager > 0 and W.Gold(h.won and wager or -wager, true) or W.Color("muted", "-"),
                 },

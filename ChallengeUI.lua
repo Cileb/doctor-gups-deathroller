@@ -30,9 +30,9 @@ local function ProbeText(p)
         return "warn", ("%s is in another deathroll right now."):format(them), false
     elseif p.status == "offline" then
         return "loss", ("%s isn't online."):format(them), false
-    else -- noreply
-        return "loss", ("No answer from %s. They may not have Doctor Gup's Deathroller, or have an old version.")
-            :format(them), "anyway"
+    else -- noreply: most likely no add-on, so offer a chat challenge
+        return "warn", ("No answer from %s. They likely don't have the add-on, but can still play: they /roll 100 to accept.")
+            :format(them), "chat"
     end
 end
 
@@ -51,6 +51,18 @@ local function Refresh()
     end
     local label = wager > 0 and ("Challenge for %sg"):format(Num(wager)) or "Challenge"
 
+    if not frame.target then
+        -- open challenge: no version check, just how it works
+        frame.status:SetText("Your character emotes the challenge. The first player nearby to type "
+            .. W.Color("text", "/roll 100") .. " in the next 60 seconds takes it on, and that roll comes first.")
+        frame.status:SetTextColor(unpack(C.muted))
+        frame.dot:Hide()
+        frame.retry:Hide()
+        frame.go:Enable()
+        frame.go:SetLabel(wager > 0 and ("Post for %sg"):format(Num(wager)) or "Post challenge")
+        return
+    end
+
     local p = frame.probe
     local color, text, canSend = "muted", "", true
     if p then color, text, canSend = ProbeText(p) end
@@ -59,7 +71,7 @@ local function Refresh()
     frame.dot:SetVertexColor(unpack(C[color]))
     frame.dot:SetShown(text ~= "")
     frame.retry:SetShown(p ~= nil and (p.status == "noreply" or p.status == "offline" or p.status == "busy"))
-    if canSend == "anyway" then label = "Challenge anyway" end
+    if canSend == "chat" then label = "Challenge in chat" end
     if canSend then frame.go:Enable() else frame.go:Disable() end
     frame.go:SetLabel(label)
 end
@@ -67,8 +79,10 @@ end
 local function Submit()
     if not frame.go:IsEnabled() then return end
     local target, wager = frame.target, CurrentWager()
+    local chat = not target or (frame.probe and frame.probe.status == "noreply")
     frame:Hide()
-    ns.StartChallenge(target, wager)      -- from a click or Enter: emotes are allowed
+    -- from a click or Enter: emotes are allowed
+    if chat then ns.StartOpenChallenge(wager, target) else ns.StartChallenge(target, wager) end
 end
 
 local function Create()
@@ -130,6 +144,7 @@ local function Create()
     f.status = W.Text(f, 11, C.muted, { wrap = true })
     f.status:SetPoint("TOPLEFT", 28, -283)
     f.status:SetWidth(200)
+    f.status:SetSpacing(2)
     f.retry = W.Button(f, "Check again", 76, 20, "ghost", function()
         f.probe = ns.CheckPlayer(f.target)
         Refresh()
@@ -151,6 +166,28 @@ end
 local function Show(target, wager)
     if not frame then Create() end
     frame.target = target
+    -- the status text gets the whole width when there's no "Check again" button
+    frame.status:ClearAllPoints()
+    if target then
+        frame.status:SetPoint("TOPLEFT", 28, -283)
+        frame.status:SetWidth(200)
+    else
+        frame.status:SetPoint("TOPLEFT", 16, -283)
+        frame.status:SetWidth(288)
+    end
+    if not target then
+        frame.who:SetText("OPEN CHALLENGE")
+        W.FitText(frame.name, "Anyone nearby", 280, 22, 14, { flags = "OUTLINE", title = true })
+        frame.h2h:SetText("Whoever accepts doesn't need the add-on")
+        frame.input:SetText(wager and wager > 0 and tostring(wager) or "")
+        frame.probe = nil
+        frame:Show()
+        Refresh()
+        frame.input:SetFocus()
+        frame.input:HighlightText()
+        return
+    end
+    frame.who:SetText("CHALLENGE")
     W.FitText(frame.name, Short(target), 280, 22, 14, { flags = "OUTLINE", title = true, fallback = FirstName(target) })
     local w, l, net = ns.HeadToHead(target)
     if w + l == 0 then

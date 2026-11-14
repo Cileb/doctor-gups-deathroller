@@ -170,7 +170,7 @@ local function CreateGameFrame()
     f.timer.label:SetText("Challenge expires")
     f.timer:SetScript("OnUpdate", function(self)
         local g = S.game
-        if g and g.state == "pending" and g.expires then self:SetExpiry(g.expires) end
+        if g and (g.state == "pending" or g.state == "open") and g.expires then self:SetExpiry(g.expires) end
     end)
 
     -- active: roll input
@@ -212,6 +212,14 @@ local function CreateGameFrame()
     -- footer buttons (shown per state)
     f.forfeit = W.Button(f, "Forfeit", 90, 26, "ghost", function() ns.Forfeit() end)
     f.forfeit:SetPoint("BOTTOMLEFT", 12, 12)
+    f.forfeit:HookScript("OnEnter", function(self)
+        if not ns.IsStalled() then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("End game")
+        GameTooltip:AddLine("Ends it with no result. Nobody wins, nobody owes.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    f.forfeit:HookScript("OnLeave", function() GameTooltip:Hide() end)
     f.statsBtn = W.Button(f, "Stats", 90, 26, "ghost", function() ns.UI.ToggleStats() end)
     f.statsBtn:SetPoint("BOTTOMRIGHT", -12, 12)
     f.cancel = W.Button(f, "Cancel challenge", 296, 26, "neutral", function() ns.Forfeit() end)
@@ -288,7 +296,8 @@ end
 -- never gives away a result that's still spinning. Returns your chance (0..1).
 local function MyWinChance(g)
     if g.state == "done" then return g.won and 1 or 0 end
-    local n, roller = g.startMax, g.challenger
+    -- whoever rolls first: the first roll's owner, or (before any roll) whose turn it is
+    local n, roller = g.startMax, (g.rolls[1] and g.rolls[1].who) or g.turn or g.challenger
     for i = #g.rolls, 1, -1 do
         local r = g.rolls[i]
         if r.revealed then
@@ -381,7 +390,7 @@ end
 
 local function UpdateLadder()
     local f, g = frame, S.game
-    local oppFirst = FirstName(g.opponent)
+    local oppFirst = g.opponent and FirstName(g.opponent) or "them"
     f.ladderLabel:SetText("ROLLS   " .. W.Color("gold", "you") .. "  " .. W.Color("opp", oppFirst:lower()))
 
     local parts = { W.Color("muted", Num(g.startMax)) }
@@ -411,7 +420,8 @@ local function Update()
     if not g then f:Hide(); return end
     if f.revealing then f:Show(); return end          -- the dice animation owns the window
 
-    local opp = Short(g.opponent)
+    local opp = g.opponent and Short(g.opponent) or "Anyone nearby"
+    f.opp.label:SetText(g.noAddon and "NO ADD-ON" or "OPPONENT")
     -- cards are narrow: shrink long names, then fall back to the first name
     W.FitText(f.me.name, Short(S.me), 118, 15, 11, { title = true, fallback = FirstName(S.me) })
     W.FitText(f.opp.name, opp, 118, 15, 11, { title = true, fallback = FirstName(opp) })
@@ -424,17 +434,26 @@ local function Update()
     f.dice:Hide()
 
     f.potLabel:SetText(g.double and W.Color("loss", "DOUBLE OR NOTHING") or "POT")
-    if g.state == "pending" then
+    if g.state == "pending" or g.state == "open" then
         ShowOnly(f, { timer = true, cancel = true })
         f.me:SetActive(false); f.opp:SetActive(false)
         f.rangeLabel:SetText("STARTING ROLL")
         f.big:SetText(Num(g.max))
         f.big:SetTextColor(unpack(C.muted))
-        f.status:SetText(("Waiting for %s to accept..."):format(W.Color("opp", FirstName(opp))))
+        if g.state == "open" then
+            -- chat challenge: the accept is a roll, and that roll comes first
+            f.status:SetText(("Waiting for %s to type %s"):format(
+                g.only and W.Color("opp", FirstName(opp)) or "anyone nearby", W.Color("text", "/roll " .. g.max)))
+            f.timer.label:SetText("First to roll takes it on")
+        else
+            f.status:SetText(("Waiting for %s to accept..."):format(W.Color("opp", FirstName(opp))))
+            f.timer.label:SetText("Challenge expires")
+        end
         f.timer:SetExpiry(g.expires or GetTime())
 
     elseif g.state == "active" or g.state == "ending" then
         ShowOnly(f, { input = true, forfeit = true, statsBtn = true })
+        f.forfeit:SetLabel(ns.IsStalled(g) and "End game" or "Forfeit")
         local mine = ns.IsMyTurn()
         f.me:SetActive(mine, "YOUR TURN")
         f.opp:SetActive(not mine and g.state == "active", "ROLLING")
@@ -452,7 +471,11 @@ local function Update()
             f.input:Enable()
             f.input:SetPlaceholder(("/roll %d   then press Enter"):format(g.max))
         else
-            f.status:SetText(("Waiting for %s to /roll %d..."):format(W.Color("opp", FirstName(opp)), g.max))
+            if ns.IsStalled(g) then
+                f.status:SetText(("%s hasn't rolled for 2 minutes."):format(W.Color("opp", FirstName(opp))))
+            else
+                f.status:SetText(("Waiting for %s to /roll %d..."):format(W.Color("opp", FirstName(opp)), g.max))
+            end
             f.input:SetText("")
             f.input:ClearFocus()
             f.input:Disable()

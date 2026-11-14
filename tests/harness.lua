@@ -638,8 +638,8 @@ local ok, err = xpcall(function()
     clients[#clients + 1] = { name = "Ghost Player", fire = function() end, systemMessage = function() end, widgets = {} }
     A.target = "Ghost Player"
     A.env.SlashCmdList.GUPSDEATHROLLER(""); Tick(3.2)
-    check(CF3.status:GetText():find("No answer from Ghost") ~= nil and CF3.go.text:GetText() == "Challenge anyway"
-        and CF3.go:IsEnabled(), "no reply: offers 'Challenge anyway'")
+    check(CF3.status:GetText():find("No answer from Ghost") ~= nil and CF3.go.text:GetText() == "Challenge in chat"
+        and CF3.go:IsEnabled(), "no reply: offers 'Challenge in chat'")
     CF3.cancel:Fire("OnClick")
 
     A.target = "Nobody Online"
@@ -895,6 +895,95 @@ local ok, err = xpcall(function()
     local big = A.env.GupsDeathrollerChallengeFrame.name
     W.FitText(big, "Bartholomew Thunderstrike", 280, 22, 14, { flags = "OUTLINE", title = true, fallback = "Bartholomew" })
     check(big:GetText() == "Bartholomew Thunderstrike" and big:GetStringWidth() <= 280, "wager window shrinks a long full name to fit")
+
+    print("== open challenges (no add-on needed)")
+    local function Stranger(name, r, hi)
+        local line = ("%s rolls %d (1-%d)"):format(name, r, hi)
+        for _, cl in ipairs(clients) do if cl.systemMessage then cl.systemMessage(line) end end
+        Tick(0.1)
+    end
+    local CFo, GF = A.env.GupsDeathrollerChallengeFrame, A.env.GupsDeathrollerFrame
+    local S = A.ns.state
+    Tick(25)
+    A.target = nil
+    A.env.SlashCmdList.GUPSDEATHROLLER("open 20"); Tick(0.1)
+    check(CFo:IsShown() and CFo.who:GetText() == "OPEN CHALLENGE" and CFo.name:GetText() == "Anyone nearby",
+        "/dr open shows the wager window for anyone nearby")
+    check(CFo.go.text:GetText() == "Post for 20g" and CFo.status:GetText():find("/roll 100") ~= nil,
+        "the window explains how to accept: " .. CFo.status:GetText())
+    local e0 = #A.emotes
+    GoChallenge(A); Tick(0.1)
+    check(A.emotes[e0 + 1] == "EMOTE: issues an open deathroll challenge for 20g! /roll 100 to accept.",
+        "open challenge emote: " .. tostring(A.emotes[e0 + 1]))
+    check(S.game and S.game.state == "open" and GF.status:GetText():find("anyone nearby") ~= nil
+        and GF.status:GetText():find("/roll 100") ~= nil, "game window: waiting for anyone to /roll 100")
+    check(not B.ns.state.invite and not B.ns.state.game, "nobody gets an add-on invite")
+    A.forced = { 40 }; A.env.RandomRoll(1, 100); Tick(0.2)
+    check(S.game.state == "open", "your own /roll 100 doesn't accept it")
+    Stranger("Zed Stranger", 33, 50)
+    check(S.game.state == "open", "a wrong range doesn't accept it")
+    Stranger("Zed Stranger", 70, 100)
+    check(S.game.state == "active" and S.game.opponent == "Zed Stranger" and #S.game.rolls == 1,
+        "first /roll 100 by someone else accepts, and counts as their first roll")
+    check(GF.opp.label:GetText() == "NO ADD-ON", "opponent card says they have no add-on")
+    Tick(4)
+    check(A.ns.IsMyTurn() and S.game.max == 70, "then it's your turn from their roll")
+    Stranger("Amy Latecomer", 12, 100)
+    check(#S.game.rolls == 1, "a second /roll 100 by someone else is ignored")
+    A.forced = { 30 }; TypeInBox(A, "/roll 70"); Tick(4)
+    check(S.game.turn == "Zed Stranger" and S.game.max == 30, "your roll lands, their turn")
+    Stranger("Zed Stranger", 1, 30); Tick(4)
+    check(S.game.state == "done" and S.game.won, "they roll a 1: you win")
+    local DBa = A.ns.GetDB()
+    check(DBa.history[1].opp == "Zed Stranger" and DBa.history[1].noAddon == true and DBa.history[1].rolls == 3,
+        "history records the chat game, marked no add-on")
+    check(A.ns.GetDebt("Zed Stranger") == 20, "debt is tracked on your side")
+
+    print("== chat rematch, stalls, timeouts")
+    e0 = #A.emotes
+    GF.rematch:Fire("OnClick"); Tick(0.1)
+    check(A.emotes[e0 + 1] == "EMOTE: challenges Zed Stranger to a deathroll for 20g! Zed, /roll 100 to accept.",
+        "rematch goes out in chat: " .. tostring(A.emotes[e0 + 1]))
+    check(S.game.state == "open" and S.game.only == "Zed Stranger", "only Zed can take the rematch")
+    Stranger("Amy Latecomer", 50, 100)
+    check(S.game.state == "open", "someone else's roll doesn't take it")
+    Stranger("Zed Stranger", 90, 100); Tick(4)
+    A.forced = { 45 }; TypeInBox(A, "/roll 90"); Tick(4)
+    check(GF.forfeit.text:GetText() == "Forfeit", "not stalled yet")
+    Tick(121)
+    check(GF.forfeit.text:GetText() == "End game" and GF.status:GetText():find("hasn't rolled") ~= nil,
+        "after 2 quiet minutes the window offers to end it")
+    local h0 = #DBa.history
+    e0 = #A.emotes
+    GF.forfeit:Fire("OnClick"); Tick(0.1)
+    check(S.game == nil and #DBa.history == h0 and A.ns.GetDebt("Zed Stranger") == 20,
+        "End game: no result, no debt change")
+    check(A.emotes[e0 + 1] == "EMOTE: calls off the deathroll with Zed Stranger.", "and says so: " .. tostring(A.emotes[e0 + 1]))
+
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1); GoChallenge(A); Tick(0.1)
+    check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge! /roll 100 to accept.", "friendly open challenge emote")
+    Tick(61)
+    check(S.game == nil, "nobody rolls in 60 s: the challenge expires")
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1); GoChallenge(A); Tick(0.1)
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    check(S.game == nil and A.emotes[#A.emotes] == "EMOTE: calls off the deathroll.", "cancelling an open challenge says so")
+
+    print("== forfeiting a chat game, and Challenge in chat")
+    A.env.SlashCmdList.GUPSDEATHROLLER("open 5"); Tick(0.1); GoChallenge(A); Tick(0.1)
+    Stranger("Zed Stranger", 60, 100); Tick(4)
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    check(S.game.state == "done" and not S.game.won and A.emotes[#A.emotes] == "EMOTE: forfeits a deathroll to Zed Stranger (5g) after 1 roll.",
+        "forfeit is announced, since they can't see it otherwise: " .. A.emotes[#A.emotes])
+    A.env.GupsDeathrollerFrame.closeBtn:Fire("OnClick"); A.ns.ClearFinished()
+    A.target = "Ghost Player"
+    A.env.SlashCmdList.GUPSDEATHROLLER(""); Tick(3.2)
+    check(CFo.go.text:GetText() == "Challenge in chat", "no reply: Challenge in chat")
+    GoChallenge(A); Tick(0.1)
+    check(S.game.state == "open" and S.game.only == "Ghost Player"
+        and A.emotes[#A.emotes] == "EMOTE: challenges Ghost Player to a deathroll! Ghost, /roll 100 to accept.",
+        "it goes out as a chat challenge to them: " .. A.emotes[#A.emotes])
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    A.target = nil
 
     print("== coin flip for who rolls first")
     local function Duel(flip)
