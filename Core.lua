@@ -672,22 +672,40 @@ local lastPong = {}
 ns.PROBE_TIMEOUT = 3
 
 -- Compare "0.9.1"-style versions: -1, 0 or 1.
+-- Only the leading "1.2.3" counts: "v1.1.0", "1.1.0-forever" and "v1.1.0-beta1" all read as 1.1.0.
+local function VersionNumbers(v)
+    local a, b, c = tostring(v):match("(%d+)%.(%d+)%.?(%d*)")
+    if not a then return nil end
+    return { tonumber(a), tonumber(b), tonumber(c) or 0 }
+end
+
 local function CompareVersions(a, b)
-    local pa, pb = {}, {}
-    for n in tostring(a):gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
-    for n in tostring(b):gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
-    for i = 1, math.max(#pa, #pb) do
-        local x, y = pa[i] or 0, pb[i] or 0
-        if x ~= y then return x < y and -1 or 1 end
+    local pa, pb = VersionNumbers(a) or { 0, 0, 0 }, VersionNumbers(b) or { 0, 0, 0 }
+    for i = 1, 3 do
+        if pa[i] ~= pb[i] then return pa[i] < pb[i] and -1 or 1 end
     end
     return 0
 end
 ns.CompareVersions = CompareVersions
 
+-- Tell the player, once per session, when someone they play has a newer version.
+-- (WoW never says an add-on update exists; the CurseForge app only does when it's opened.)
+local newestSeen
+local function NoteTheirVersion(theirs)
+    if not VersionNumbers(ns.VERSION) or not VersionNumbers(theirs) then return end   -- dev copies have no number
+    if CompareVersions(theirs, ns.VERSION) <= 0 then return end
+    if newestSeen and CompareVersions(theirs, newestSeen) <= 0 then return end         -- already told you
+    newestSeen = theirs
+    Print(("A newer version of Doctor Gup's Deathroller (%s) is out. You have %s. Update it in the CurseForge app.")
+        :format(theirs, ns.VERSION))
+end
+ns.NoteTheirVersion = NoteTheirVersion
+
 function ns.CheckPlayer(target)
     local p = { target = target, id = NewId(), status = "checking" }
     probe = p
-    if not Send(target, "PING", p.id) then p.status = "offline" end
+    -- proto and version ride along so the other player learns if you're newer (1.1.0 and older ignore them)
+    if not Send(target, "PING", p.id, ns.PROTO, ns.VERSION) then p.status = "offline" end
     UI("ProbeUpdated", p)
     C_Timer.After(ns.PROBE_TIMEOUT, function()
         if probe == p and p.status == "checking" then
@@ -720,6 +738,7 @@ local function OnAddonMessage(text, sender)
         lastPong[sender] = GetTime()
         local busy = (S.game and S.game.state ~= "done") or S.invite
         Send(sender, "PONG", a or "", ns.PROTO, ns.VERSION, busy and 1 or 0)
+        if c then NoteTheirVersion(c) end
         return
     end
 
@@ -727,6 +746,7 @@ local function OnAddonMessage(text, sender)
         local p = probe
         if not p or p.id ~= a or not SameName(p.target, sender) then return end
         p.theirProto, p.theirVersion = tonumber(b), c or "?"
+        NoteTheirVersion(p.theirVersion)
         if p.theirProto ~= ns.PROTO then p.status = "incompatible"
         elseif d == "1" then p.status = "busy"
         elseif CompareVersions(p.theirVersion, ns.VERSION) ~= 0 then p.status = "different"

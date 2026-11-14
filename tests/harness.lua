@@ -831,6 +831,45 @@ local ok, err = xpcall(function()
     check(not AF.double:IsShown() and AF.rematch._w == 296, "friendly game: no double or nothing, rematch fills the row")
     A.ns.state.game.wager = 6000000
     check(not A.ns.CanDouble(A.ns.state.game), "can't double past the 7-digit wager limit")
+
+    print("== newer-version notice")
+    local cv = A.ns.CompareVersions
+    check(cv("v1.2.0-beta1", "v1.2.0") == 0 and cv("1.1.0-forever", "v1.1.0") == 0 and cv("v1.10.0", "v1.9.9") == 1,
+        "versions compare by their leading numbers")
+    if A.ns.state.game and A.ns.state.game.state ~= "done" then A.ns.Forfeit(); Tick(3) end
+    A.env.GupsDeathrollerFrame:Hide(); B.env.GupsDeathrollerFrame:Hide()
+    local function Notices(c)
+        local n = 0
+        for _, line in ipairs(c.logs) do if line:find("A newer version of Doctor Gup") then n = n + 1 end end
+        return n
+    end
+    A.ns.VERSION, B.ns.VERSION = "v1.1.1", "v1.1.0"
+    local a0, b0 = Notices(A), Notices(B)
+    local function Check(from, to)
+        Tick(1)
+        from.target = to.name
+        from.env.SlashCmdList.GUPSDEATHROLLER("")
+        Tick(0.3)
+        from.env.GupsDeathrollerChallengeFrame.cancel:Fire("OnClick")
+    end
+    Check(B, A)
+    check(Notices(B) == b0 + 1, "checking someone newer tells you to update")
+    local last = B.logs[#B.logs]
+    for _, line in ipairs(B.logs) do if line:find("A newer version") then last = line end end
+    check(last:find("%(v1%.1%.1%) is out%. You have v1%.1%.0%. Update it in the CurseForge app%."), "notice: " .. last)
+    check(Notices(A) == a0, "the newer player gets no notice")
+    Check(B, A)
+    check(Notices(B) == b0 + 1, "only once per session")
+    Check(A, B)
+    check(Notices(B) == b0 + 1, "being checked by the same version doesn't repeat it")
+    A.ns.VERSION = "v1.2.0"
+    Check(A, B)
+    check(Notices(B) == b0 + 2, "being checked by someone even newer tells you again (their check carries their version)")
+    B.ns.VERSION = "@project-version@"
+    A.ns.VERSION = "v1.3.0"
+    Check(B, A)
+    check(Notices(B) == b0 + 2, "development copies (no version number) never nag")
+    A.ns.VERSION, B.ns.VERSION = "0.9.1", "0.9.1"
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end
