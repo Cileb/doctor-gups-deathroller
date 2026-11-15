@@ -67,6 +67,10 @@ local function CreateGameFrame()
     f:SetScript("OnHide", function()
         if f.input then f.input:ClearFocus() end      -- give the keyboard back
         ns.ClearFinished()
+        if ns.UI.UpdateEmotePrompt then ns.UI.UpdateEmotePrompt() end   -- a waiting announcement stays put
+    end)
+    f:SetScript("OnShow", function()
+        if ns.UI.UpdateEmotePrompt then ns.UI.UpdateEmotePrompt() end   -- dock it back under the window
     end)
 
 
@@ -745,16 +749,19 @@ ns.OnSetting(function(key)
 end)
 
 ------------------------------------------------------------------------
--- "Press Enter to post" bar. On Forever an add-on can only emote after a key
+-- "Press Enter to post" tray. On Forever an add-on can only emote after a key
 -- press (a click doesn't count), so after a click the announcement waits here.
+-- It docks under the game window as part of it (moves, scales and hides with
+-- it). If the window isn't open, it stands alone where the window was.
 -- Only Enter and Esc are taken; every other key keeps working as normal.
 ------------------------------------------------------------------------
 local prompt
+local TRAY_H = 78
 
 local function KeyCap(parent, label)
     local cap = CreateFrame("Frame", nil, parent)
     cap:SetHeight(18)
-    local bg = W.Tex(cap, C.header, "BACKGROUND")
+    local bg = W.Tex(cap, C.card, "BACKGROUND")
     bg:SetAllPoints()
     W.Border(cap, { C.accent[1], C.accent[2], C.accent[3], 0.8 })
     cap.text = W.Text(cap, 10, C.gold, { flags = "OUTLINE" })
@@ -766,35 +773,40 @@ end
 
 local function CreatePrompt()
     local f = CreateFrame("Frame", "GupsDeathrollerEmotePrompt", UIParent)
-    f:SetSize(320, 84)
+    f:SetSize(320, TRAY_H)
     f:SetFrameStrata("DIALOG")
-    f:SetClampedToScreen(true)
     f:EnableMouse(true)
-    f.bg = W.Tex(f, C.bg)
+    -- a tray: a shade darker than the window, so it reads as a drawer pulled out of it
+    f.bg = W.Tex(f, C.header)
     f.bg:SetAllPoints()
     W.Border(f)
-    local inner = CreateFrame("Frame", nil, f)
-    inner:SetPoint("TOPLEFT", 1, -1); inner:SetPoint("BOTTOMRIGHT", -1, 1)
-    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
+    f.seam = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.6 }, "ARTWORK")   -- brass lip where it joins
+    f.seam:SetHeight(1)
+    f.seam:SetPoint("TOPLEFT", 1, -1); f.seam:SetPoint("TOPRIGHT", -1, -1)
 
-    f.caption = W.Text(f, 10, C.muted)
-    f.caption:SetPoint("TOPLEFT", 12, -9)
-    f.caption:SetText("ANNOUNCE TO PEOPLE NEARBY")
+    f.caption = W.Text(f, 10, C.gold)
+    f.caption:SetPoint("TOPLEFT", 12, -10)
+    f.caption:SetText("ANNOUNCE TO PEOPLE NEARBY?")
     f.count = W.Text(f, 10, C.muted, { justify = "RIGHT" })
-    f.count:SetPoint("TOPRIGHT", -28, -9)
-
+    f.count:SetPoint("TOPRIGHT", -30, -10)
+    -- mouse users can still dismiss it (skipping needs no key press)
     f.close = CreateFrame("Button", nil, f)
     f.close:SetSize(16, 16)
-    f.close:SetPoint("TOPRIGHT", -6, -6)
+    f.close:SetPoint("TOPRIGHT", -8, -7)
     f.close.text = W.Text(f.close, 12, C.muted)
     f.close.text:SetPoint("CENTER")
     f.close.text:SetText("x")
-    f.close:SetScript("OnClick", function() ns.SkipEmotes() end)   -- skipping needs no key press
-    f.close:SetScript("OnEnter", function(self) self.text:SetTextColor(unpack(C.text)) end)
-    f.close:SetScript("OnLeave", function(self) self.text:SetTextColor(unpack(C.muted)) end)
+    f.close:SetScript("OnClick", function() ns.SkipEmotes() end)
+    f.close:SetScript("OnEnter", function(self)
+        self.text:SetTextColor(unpack(C.text))
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Don't announce")
+        GameTooltip:Show()
+    end)
+    f.close:SetScript("OnLeave", function(self) self.text:SetTextColor(unpack(C.muted)); GameTooltip:Hide() end)
 
     f.preview = W.Text(f, 12, C.text, { justify = "LEFT" })
-    f.preview:SetPoint("TOPLEFT", 12, -24)
+    f.preview:SetPoint("TOPLEFT", 12, -25)
     f.preview:SetWidth(296)
     f.preview:SetMaxLines(2)
 
@@ -808,9 +820,19 @@ local function CreatePrompt()
     f.escText = W.Text(f, 11, C.muted)
     f.escText:SetPoint("LEFT", f.esc, "RIGHT", 6, 0)
     f.escText:SetText("Skip")
+    -- why a key and not a click, for anyone who wonders
+    f.why = W.Text(f, 10, C.muted, { justify = "RIGHT" })
+    f.why:SetPoint("BOTTOMRIGHT", -12, 13)
+    f.why:SetText("WoW needs a key press")
+
+    -- a slow glow on ENTER so the eye finds it
+    f.enterPulse = f.enter:CreateAnimationGroup()
+    f.enterPulse:SetLooping("BOUNCE")
+    local a = f.enterPulse:CreateAnimation("Alpha")
+    a:SetFromAlpha(1); a:SetToAlpha(0.55); a:SetDuration(0.8)
 
     -- time left before it's dropped: a thin brass line along the bottom
-    f.timeBar = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.8 }, "ARTWORK")
+    f.timeBar = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.8 }, "ARTWORK", 2)
     f.timeBar:SetHeight(2)
     f.timeBar:SetPoint("BOTTOMLEFT", 1, 1)
     f:SetScript("OnUpdate", function(self)
@@ -820,7 +842,8 @@ local function CreatePrompt()
         self.timeBar:SetWidth(math.max(1, 318 * left / ns.EMOTE_WAIT))
     end)
 
-    -- keys: take Enter and Esc, pass everything else on
+    -- keys: take Enter and Esc, pass everything else on. Esc here skips the
+    -- announcement rather than closing the window; a second Esc closes it.
     f:EnableKeyboard(true)
     f:SetPropagateKeyboardInput(true)
     f:SetScript("OnKeyDown", function(self, key)
@@ -828,27 +851,51 @@ local function CreatePrompt()
         local used = ns.EmotePromptKey(key)
         self:SetPropagateKeyboardInput(not used)
     end)
+    f:SetScript("OnShow", function(self) self.enterPulse:Play() end)
+    f:SetScript("OnHide", function(self) self.enterPulse:Stop() end)
     f:Hide()
     return f
+end
+
+-- Dock under the game window, or stand alone where it was.
+local function PlacePrompt()
+    prompt:ClearAllPoints()
+    if frame and frame:IsShown() then
+        prompt:SetParent(frame)
+        prompt:SetFrameLevel(frame:GetFrameLevel() + 20)
+        prompt:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 1)     -- overlap the window's bottom edge
+        prompt:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, 1)
+        prompt:SetScale(1)                                         -- inherits the window's scale
+        frame:SetClampRectInsets(0, 0, 0, -(TRAY_H - 1))         -- keep the tray on screen too
+        prompt.seam:Show()
+    else
+        prompt:SetParent(UIParent)
+        prompt:SetFrameStrata("DIALOG")
+        prompt:SetScale(ns.Setting("scale") or 1)
+        local x, top = frame and frame:GetCenter(), frame and frame:GetTop()
+        if type(x) == "number" and type(top) == "number" then
+            prompt:SetPoint("TOP", UIParent, "BOTTOMLEFT", x, top)   -- where the window just was
+        else
+            prompt:SetPoint("TOP", UIParent, "TOP", 0, -160)
+        end
+        prompt.seam:Hide()
+    end
 end
 
 local function UpdateEmotePrompt()
     local text, count, expires = ns.PendingEmote()
     if not text then
-        if prompt then prompt:Hide() end
+        if prompt and prompt:IsShown() then
+            prompt:Hide()
+            if frame then frame:SetClampRectInsets(0, 0, 0, 0) end
+        end
         return
     end
     prompt = prompt or CreatePrompt()
     prompt.preview:SetText(W.Color("muted", Short(S.me or "You")) .. " " .. text)
     prompt.count:SetText(count > 1 and ("1 of %d"):format(count) or "")
     prompt.expires = expires
-    prompt:ClearAllPoints()
-    if frame and frame:IsShown() then
-        prompt:SetPoint("TOP", frame, "BOTTOM", 0, -6)
-    else
-        prompt:SetPoint("TOP", UIParent, "TOP", 0, -160)
-    end
-    prompt:SetScale(ns.Setting("scale") or 1)
+    PlacePrompt()
     if not prompt:IsShown() then
         prompt:Show()
         ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")

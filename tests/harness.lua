@@ -49,7 +49,15 @@ function Methods:IsEnabled() return self._enabled end
 function Methods:HasFocus() return self._focus or false end
 function Methods:SetFocus() self._focus = true; self:Fire("OnEditFocusGained") end
 function Methods:ClearFocus() if self._focus then self._focus = false; self:Fire("OnEditFocusLost") end end
-function Methods:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
+function Methods:SetPoint(p, rel, ...) if not self._point then self._point = { p, type(rel) == "table" and rel or nil } end end
+function Methods:ClearAllPoints() self._point = nil end
+function Methods:GetPoint()
+    local pt = self._point
+    if pt then return pt[1], pt[2], "CENTER", 0, 0 end
+    return "CENTER", nil, "CENTER", 0, 0
+end
+function Methods:SetParent(p) self._parent = p end
+function Methods:GetParent() return self._parent end
 function Methods:GetFrameLevel() return 1 end
 function Methods:IsOwned() return false end
 function Methods:RegisterEvent(e)
@@ -225,7 +233,7 @@ local function Tick(seconds)
             -- the player keeps pressing keys (moving etc.), which lets held emotes go out
             -- the player presses Enter on the "Press Enter to post" bar when it shows
             local bar = c.env and c.env.GupsDeathrollerEmotePrompt
-            if bar and bar:IsShown() and c.autoKeys ~= false then bar:Fire("OnKeyDown", "ENTER") end
+            if bar and bar:IsVisible() and c.autoKeys ~= false then bar:Fire("OnKeyDown", "ENTER") end
         end
     end
 end
@@ -1052,6 +1060,8 @@ local ok, err = xpcall(function()
     check(#A.emotes == n0 and A.ns.state.game.state == "open", "clicking Post: emote waits, challenge is open")
     check(bar and bar:IsShown() and bar.preview:GetText():find("issues an open deathroll challenge for 1g!", 1, true) ~= nil,
         "the Enter bar shows what will be posted")
+    local GFd = A.env.GupsDeathrollerFrame
+    check(bar:GetParent() == GFd and select(2, bar:GetPoint()) == GFd, "the bar docks under the game window")
     bar:Fire("OnKeyDown", "W")
     check(#A.emotes == n0 and bar:IsShown() and bar._propagate == true, "other keys pass through and post nothing")
     bar:Fire("OnKeyDown", "ENTER")
@@ -1078,6 +1088,10 @@ local ok, err = xpcall(function()
     -- unposted ones expire
     A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
     check(bar:IsShown(), "call-off waits too")
+    check(bar:IsShown() and bar:GetParent() ~= GFd, "window closed: the bar stays, standing alone")
+    GFd:Show()
+    check(bar:GetParent() == GFd, "window reopened: docks back under it")
+    GFd:Hide()
     Tick(31)
     check(not bar:IsShown(), "after 30 s the bar goes away")
     bar:Fire("OnKeyDown", "ENTER")

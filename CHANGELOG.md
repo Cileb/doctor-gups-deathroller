@@ -1,5 +1,6 @@
 ## 1.3.2
 
+- **The "Press Enter to post" bar is now part of the game window.** It slides out under the window like a drawer, and moves, scales and closes with it. If you close the window while an announcement is waiting, the bar stays where the window was. Enter posts, Esc skips (a second Esc closes the window), and the x dismisses it with the mouse.
 - **Removed the "Put in" button from the trade banner.** WoW doesn't let add-ons fill in the trade's gold, so the button didn't do anything. The banner now tells you how much to put in the trade's gold box, and still tracks the gold live and settles the debt when the trade completes.
 
 ## 1.3.1
