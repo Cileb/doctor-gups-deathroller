@@ -1,3 +1,7 @@
+## 1.3.2
+
+- **Removed the "Put in" button from the trade banner.** WoW doesn't let add-ons fill in the trade's gold, so the button didn't do anything. The banner now tells you how much to put in the trade's gold box, and still tracks the gold live and settles the debt when the trade completes.
+
 ## 1.3.1
 
 - **Fix: announcements work again on WoW Forever.** Since Forever 1.60.1, add-ons can only post emotes after a key press, and a click on an add-on window doesn't count. Announcements now go out at once when you type a `/dr` command or press Enter in the wager window. After a click, a small bar shows what will be posted: press **Enter** to post it or **Esc** to skip it. Every other key keeps working as normal. Unposted announcements are dropped after 30 seconds, so nothing posts late.

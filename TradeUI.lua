@@ -49,14 +49,6 @@ local function Create()
     end)
     b.count:SetPoint("BOTTOMLEFT", 10, 8)
 
-    b.pay = W.Button(b, "Put in", 100, 24, "primary", function()
-        if not ns.PayDebtInTrade() then
-            local debt = ns.GetDebt(ns.state.trade and ns.state.trade.partner)
-            b.status:SetText(W.Color("warn", ("Type %s into the trade's gold box."):format(G(-debt))))
-        end
-    end)
-    b.pay:SetPoint("BOTTOMRIGHT", -10, 8)
-
     b:Hide()
     banner = b
 end
@@ -81,7 +73,6 @@ local function Refresh()
         banner.headline:SetText(W.Color("win", "All square with " .. FirstName(who)))
         banner.sub:SetText("No deathroll debt left.")
         banner.status:SetText("")
-        banner.pay:Hide()
         banner.count:Hide()
         return
     end
@@ -93,7 +84,6 @@ local function Refresh()
 
     if debt > 0 then
         banner.headline:SetText(("%s owes you %s"):format(FirstName(who), G(debt)))
-        banner.pay:Hide()
         local get = t.get / 10000
         if get <= 0 then
             banner.status:SetText(W.Color("muted", ("Waiting for %s to put gold in the trade..."):format(FirstName(who))))
@@ -105,11 +95,9 @@ local function Refresh()
     else
         local owe = -debt
         banner.headline:SetText(("You owe %s %s"):format(FirstName(who), G(owe)))
-        banner.pay:SetLabel("Put in " .. G(math.ceil(owe)))
-        banner.pay:Show()
         local give = t.give / 10000
         if give <= 0 then
-            banner.status:SetText(W.Color("muted", "No gold in the trade yet."))
+            banner.status:SetText(W.Color("muted", ("Put %s in the trade's gold box."):format(G(math.ceil(owe)))))
         elseif give + 0.0001 >= owe then
             banner.status:SetText(W.Color("win", ("You're putting in %s. That covers it."):format(G(give))))
         else

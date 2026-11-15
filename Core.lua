@@ -1130,23 +1130,6 @@ local function OnTradeEvent(event, ...)
     end
 end
 
--- "Put in Ng" on the trade banner (a click, so the game allows it).
-function ns.PayDebtInTrade()
-    local t = S.trade
-    if not t then return false end
-    local debt = ns.GetDebt(t.partner)
-    if debt >= 0 then return false end
-    local copper = math.ceil(-debt) * 10000
-    if GetMoney() < copper then
-        Print(("You only have %sg; you owe %sg."):format(Num(ns.MyGold()), Num(math.ceil(-debt))))
-        return false
-    end
-    local ok = SetTradeMoney and pcall(SetTradeMoney, copper)
-    t.give = (GetPlayerTradeMoney and GetPlayerTradeMoney()) or t.give
-    UI("RefreshTrade")
-    return ok and t.give == copper
-end
-
 ---------------------------------------------------------------------------
 -- Slash commands
 ---------------------------------------------------------------------------
