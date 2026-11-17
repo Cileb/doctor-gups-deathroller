@@ -5,7 +5,8 @@
   - When you click **Start rolling** (or after 60 seconds), your character calls everyone in by name to `/roll 150`. Each player's first roll counts.
   - When everyone has rolled (or after 60 seconds, or when you click **Close rolls**), **the lowest roller pays the highest roller the difference**. For example, 120 and 10 means 110g.
   - **Ties** for highest or lowest: just the tied players roll again to decide who wins or pays. The amount still uses the original rolls. If everyone rolls the same, nobody owes anything.
-  - The window lists everyone and their rolls as they come in, then shows who owes whom. If you were the winner or the payer, it goes into your stats, history (marked "free for all") and debts.
+  - The window lists everyone and their rolls as they come in, then shows who owes whom.
+  - **It counts for everyone with the add-on, not just the host.** Their add-on tells them when they're in and when to roll. Whoever wins or pays gets the game in their stats, history (marked "free for all") and debts, and debts match on both sides. A result that doesn't match the roll you made isn't recorded.
 
 ## 1.4.2
 

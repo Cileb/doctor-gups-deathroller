@@ -1035,6 +1035,7 @@ end
 local function OnAddonMessage(text, sender)
     sender = FullName(sender)
     if not sender or SameName(sender, S.me) then return end
+    if text:sub(1, 3) == "FFA" then ns.FFA_OnAddon(text, sender); return end   -- Free For All
     local cmd, a, b, c, d, e, f, g7 = strsplit("|", text)
 
     if cmd == "PING" then
@@ -1342,9 +1343,13 @@ events:SetScript("OnEvent", function(_, event, ...)
             probe.status = "offline"
             UI("ProbeUpdated", probe)
         end
-        if ROLL_PATTERN and ns.FFA_IsActive and ns.FFA_IsActive() and not IsSecret(msg) then
+        if ROLL_PATTERN and not IsSecret(msg) and ns.FFA_IsActive
+            and (ns.FFA_IsActive() or ns.FFA_IsPlaying()) then
             local who, roll, lo, hi = ParseRoll(msg)
-            if who then ns.FFA_OnRoll(who, roll, lo, hi) end
+            if who then
+                if ns.FFA_IsActive() then ns.FFA_OnRoll(who, roll, lo, hi) end
+                if SameName(who, S.me) then ns.FFA_OnMyRoll(roll, lo, hi) end
+            end
         end
         if not S.game or not ROLL_PATTERN then return end
         if IsSecret(msg) then Debug("system message is a secret value; can't read it"); return end

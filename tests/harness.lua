@@ -1359,6 +1359,58 @@ local ok, err = xpcall(function()
     A.env.SlashCmdList.GUPSDEATHROLLER("ffa 50"); Tick(0.1)
     A.env.SlashCmdList.GUPSDEATHROLLER("cancel"); Tick(0.1)
     check(S2.ffa == nil and A.emotes[#A.emotes] == "EMOTE: calls off the Free For All.", "/dr cancel calls it off")
+
+    print("== Free For All: players with the add-on get it on their side too")
+    local function Logged2(c, text)
+        for i = #c.logs, 1, -1 do if c.logs[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    local DBb = B.ns.GetDB()
+    local bh0, bDebtZed, bDebtA, aDebtB = #DBb.history, B.ns.GetDebt("Zed Stranger"), B.ns.GetDebt(A.name), A.ns.GetDebt(B.name)
+    A.env.SlashCmdList.GUPSDEATHROLLER("ffa 150"); Tick(0.1)
+    Say("1", B.name); Say("1", "Zed Stranger")
+    check(Logged2(B, "You're in Doctor Gup's Free For All (1-150)"), "B's add-on hears they're in")
+    B.forced = { 7 }; B.env.RandomRoll(1, 150); Tick(0.2)       -- too early: doesn't count anywhere
+    FF.right:Fire("OnClick"); Tick(0.2)
+    check(Logged2(B, "Doctor Gup called for rolls: type /roll 150 now!"), "B's add-on hears the call for rolls")
+    MyRoll(90)
+    B.forced = { 140 }; B.env.RandomRoll(1, 150); Tick(0.2)
+    Line("Zed Stranger", 20, 150)
+    check(S2.ffa.result.winner == B.name and S2.ffa.result.payer == "Zed Stranger" and S2.ffa.result.amount == 120,
+        "host: B wins, Zed pays 120")
+    check(#DBb.history == bh0 + 1 and DBb.history[1].mode == "ffa" and DBb.history[1].won and DBb.history[1].wager == 120
+        and DBb.history[1].opp == "Zed Stranger" and DBb.history[1].myRoll == 140,
+        "B's stats get the win vs Zed (120g)")
+    check(B.ns.GetDebt("Zed Stranger") == bDebtZed + 120, "and B's debts: Zed owes B 120g")
+    check(Logged2(B, "You won Doctor Gup's Free For All! Zed Stranger owes you 120g."), "B is told")
+
+    -- B rolls lowest: both sides record it, and their debts match
+    FF.left:Fire("OnClick"); Tick(0.2)
+    Say("1", B.name)
+    FF.right:Fire("OnClick"); Tick(0.2)
+    MyRoll(100)
+    B.forced = { 3 }; B.env.RandomRoll(1, 150); Tick(0.2)
+    check(DBb.history[1].mode == "ffa" and not DBb.history[1].won and DBb.history[1].wager == 97 and DBb.history[1].opp == A.name,
+        "B pays: a 97g loss vs Doctor on B's side")
+    check(B.ns.GetDebt(A.name) == bDebtA - 97 and A.ns.GetDebt(B.name) == aDebtB + 97, "debts match on both sides")
+
+    -- leaving and cancelling tell B
+    FF.left:Fire("OnClick"); Tick(0.2)
+    Say("1", B.name); Say("-1", B.name)
+    check(Logged2(B, "You're out of Doctor Gup's Free For All."), "-1: B's add-on hears they're out")
+    Say("1", B.name)
+    A.env.SlashCmdList.GUPSDEATHROLLER("cancel"); Tick(0.1)
+    check(not B.ns.FFA_IsPlaying(), "cancelled: B's add-on drops it")
+
+    -- a result that doesn't match your own roll isn't recorded
+    local bh1 = #DBb.history
+    B.ns.FFA_OnAddon("FFAJ|fake1|150", A.name)
+    B.ns.FFA_OnAddon("FFAC|fake1", A.name)
+    B.forced = { 60 }; B.env.RandomRoll(1, 150); Tick(0.2)
+    B.ns.FFA_OnAddon("FFAR|fake1|150|2|Meudayr Darkpaw|Zed Stranger|149|1|148", A.name)
+    check(#DBb.history == bh1 and Logged2(B, "doesn't match your roll (60)"), "a result that doesn't match your roll is ignored")
+    B.ns.FFA_OnAddon("FFAR|other|150|2|Meudayr Darkpaw|Zed Stranger|149|1|148", "Some Stranger")
+    check(#DBb.history == bh1, "a result for a game you never joined is ignored")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end

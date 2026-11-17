@@ -10,8 +10,13 @@
 --      the amount still uses the original rolls.
 --
 -- Only the host's add-on runs the game: it reads "1" from chat and rolls from the
--- system messages, so nobody else needs the add-on. Stats, history and debts are
--- recorded for the host when they're the winner or the payer.
+-- system messages, so nobody else needs the add-on. Players who do have it are
+-- told (hidden add-on whispers, which players without it never see) when they're
+-- in, out, and the result, so it lands in their stats too. Stats, history and
+-- debts are recorded for whoever is the winner or the payer, host or not:
+--   FFAJ|id|max      you're in        FFAC|id       roll now
+--   FFAX|id          you're out / it's off
+--   FFAR|id|max|players|winner|payer|high|low|amount   the result
 
 local ADDON_NAME, ns = ...
 local S = ns.state
@@ -29,6 +34,18 @@ local function Print(...) return ns.Print(...) end
 local function Short(n) return ns.Short(n) end
 local function FirstName(n) return ns.FirstName(n) end
 local function Num(n) return ns.Num(n) end
+
+-- Quietly tell a player's add-on (if they have one) what's going on.
+local function Notify(name, ...)
+    if not name or ns.SameName(name, S.me) then return end
+    local msg = table.concat({ ... }, "|")
+    ns.Debug(("-> %s : %s"):format(name, msg))
+    pcall(C_ChatInfo.SendAddonMessage, ns.PREFIX, msg, "WHISPER", name)
+end
+
+local function NotifyAll(f, ...)
+    for _, p in ipairs(f.players) do Notify(p.name, ...) end
+end
 
 function ns.FFA_IsActive()
     local f = S.ffa
@@ -101,6 +118,7 @@ function ns.FFA_OnChat(msg, author)
     if text == "1" then
         if Find(f, name) then return end
         f.players[#f.players + 1] = { name = name }
+        Notify(name, "FFAJ", f.id, f.max)
         Print(("%s joined (%d players)."):format(Short(name), #f.players))
         ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
         UI("FFAUpdate")
@@ -108,6 +126,7 @@ function ns.FFA_OnChat(msg, author)
         local p, i = Find(f, name)
         if p and not p.host then
             table.remove(f.players, i)
+            Notify(name, "FFAX", f.id)
             Print(("%s left (%d players)."):format(Short(name), #f.players))
             UI("FFAUpdate")
         end
@@ -127,6 +146,7 @@ function ns.FFA_StartRolling(auto)
     if #f.players < 2 then
         Print(auto and "Nobody joined your Free For All, so it's off." or "You need at least one other player first.")
         if auto then
+            NotifyAll(f, "FFAX", f.id)
             ns.Emote("calls off the Free For All: nobody joined.", nil, true)
             S.ffa = nil
             UI("FFAUpdate")
@@ -134,6 +154,7 @@ function ns.FFA_StartRolling(auto)
         return
     end
     f.phase = "roll"
+    NotifyAll(f, "FFAC", f.id)
     ns.Emote(("calls for rolls! %s: /roll %d now."):format(NameList(f.players), f.max))
     Print(("Rolling! Everyone in types /roll %d. You too."):format(f.max))
     StartTimer(f, ns.FFA_ROLL_TIME, function() Finish(true) end)
@@ -198,6 +219,7 @@ Finish = function(timedOut)
         if #rolled < 2 then
             Print("Not enough players rolled, so there's no result.")
             ns.Emote("calls off the Free For All: not enough rolls.", nil, true)
+            NotifyAll(f, "FFAX", f.id)
             f.phase, f.result = "done", { none = true }
             UI("FFAUpdate")
             return
@@ -207,6 +229,7 @@ Finish = function(timedOut)
         f.highRoll, f.lowRoll = hi, lo
         if hi == lo then
             f.phase, f.result = "done", { none = true, allTied = true }
+            NotifyAll(f, "FFAR", f.id, f.max, #f.players, "", "", hi, lo, 0)
             Print(("Everyone rolled %d. Nobody owes anything."):format(hi))
             ns.Emote(("Free For All: everyone rolled %d, so nobody owes anything!"):format(hi))
             UI("FFAUpdate")
@@ -261,7 +284,8 @@ end
 -- Result
 ---------------------------------------------------------------------------
 
-local function Record(f, won, other, amount)
+-- info: { max, players (count), highRoll, lowRoll }
+local function Record(info, won, other, amount)
     local DB = ns.GetDB()
     local s = DB.stats
     local o = DB.opponents[other] or { w = 0, l = 0, net = 0 }
@@ -279,9 +303,9 @@ local function Record(f, won, other, amount)
     end
     o.last = time()
     table.insert(DB.history, 1, {
-        t = time(), opp = other, won = won, wager = amount, start = f.max,
-        mode = "ffa", players = #f.players, myRoll = f.highRoll and (won and f.highRoll or f.lowRoll),
-        theirRoll = won and f.lowRoll or f.highRoll,
+        t = time(), opp = other, won = won, wager = amount, start = info.max,
+        mode = "ffa", players = info.players, myRoll = won and info.highRoll or info.lowRoll,
+        theirRoll = won and info.lowRoll or info.highRoll,
     })
     while #DB.history > ns.HISTORY_SIZE do table.remove(DB.history) end
     if amount > 0 then ns.AdjustDebt(other, won and amount or -amount, true) end
@@ -295,14 +319,16 @@ function ns.FFA_Resolve()
     f.result = { winner = w.name, payer = p.name, amount = amount }
     for _, q in ipairs(f.players) do q.tie = nil end
 
+    NotifyAll(f, "FFAR", f.id, f.max, #f.players, w.name, p.name, f.highRoll, f.lowRoll, amount)
+    local info = { max = f.max, players = #f.players, highRoll = f.highRoll, lowRoll = f.lowRoll }
     ns.Emote(("Free For All result: %s rolled %d (highest), %s rolled %d (lowest). %s owes %s %sg!"):format(
         Short(w.name), f.highRoll, Short(p.name), f.lowRoll, FirstName(p.name), FirstName(w.name), Num(amount)))
     if ns.SameName(w.name, S.me) then
-        Record(f, true, p.name, amount)
+        Record(info, true, p.name, amount)
         Print(("You win! %s owes you %sg."):format(Short(p.name), Num(amount)))
         ns.Sound("LOOT_WINDOW_COIN_SOUND")
     elseif ns.SameName(p.name, S.me) then
-        Record(f, false, w.name, amount)
+        Record(info, false, w.name, amount)
         Print(("You rolled lowest: you owe %s %sg."):format(Short(w.name), Num(amount)))
     else
         Print(("%s owes %s %sg."):format(Short(p.name), Short(w.name), Num(amount)))
@@ -315,6 +341,7 @@ function ns.FFA_Cancel()
     local f = S.ffa
     if not f then return end
     if f.phase ~= "done" then
+        NotifyAll(f, "FFAX", f.id)
         ns.Emote("calls off the Free For All.", nil, true)
         Print("Free For All cancelled.")
     end
@@ -325,4 +352,90 @@ end
 -- Close the window after a finished game (or abandon one).
 function ns.FFA_Clear()
     if S.ffa and S.ffa.phase == "done" then S.ffa = nil end
+end
+
+---------------------------------------------------------------------------
+-- Playing in someone else's Free For All (when you have the add-on too)
+---------------------------------------------------------------------------
+
+-- id -> { host, max, t, myRoll }; kept a few minutes at most
+local joined = {}
+ns.ffaJoined = joined
+local JOINED_LIFETIME = 600
+
+local function Prune()
+    for id, j in pairs(joined) do
+        if time() - j.t > JOINED_LIFETIME then joined[id] = nil end
+    end
+end
+
+function ns.FFA_IsPlaying()
+    Prune()
+    return next(joined) ~= nil
+end
+
+-- Your own rolls, so a reported result can be checked against what you rolled.
+function ns.FFA_OnMyRoll(roll, lo, hi)
+    for _, j in pairs(joined) do
+        if lo == 1 and hi == j.max and not j.myRoll and j.calling then j.myRoll = roll end
+    end
+end
+
+function ns.FFA_OnAddon(text, sender)
+    local parts = { strsplit("|", text) }
+    local cmd, id = parts[1], parts[2]
+    if not id then return end
+    local host = ns.FullName(sender)
+    if cmd == "FFAJ" then
+        local max = tonumber(parts[3])
+        if not max then return end
+        joined[id] = { host = host, max = max, t = time() }
+        Print(("You're in %s's Free For All (1-%s). When they call for rolls, type /roll %d."):format(
+            Short(host), Num(max), max))
+        ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+    elseif cmd == "FFAC" then
+        local j = joined[id]
+        if j and ns.SameName(j.host, host) then
+            j.calling = true                                   -- your next roll in range is the one that counts
+            Print(("%s called for rolls: type /roll %d now!"):format(Short(host), j.max))
+            ns.Sound("READY_CHECK")
+        end
+    elseif cmd == "FFAX" then
+        local j = joined[id]
+        if j and ns.SameName(j.host, host) then
+            joined[id] = nil
+            Print(("You're out of %s's Free For All."):format(Short(host)))
+        end
+    elseif cmd == "FFAR" then
+        local j = joined[id]
+        if not (j and ns.SameName(j.host, host)) then return end
+        joined[id] = nil
+        local max, count = tonumber(parts[3]), tonumber(parts[4])
+        local winner, payer = parts[5], parts[6]
+        local high, low, amount = tonumber(parts[7]), tonumber(parts[8]), tonumber(parts[9])
+        if not (max and high and low and amount) then return end
+        if amount <= 0 or winner == "" then
+            Print(("%s's Free For All: everyone rolled the same, so nobody owes anything."):format(Short(host)))
+            return
+        end
+        local info = { max = max, players = count or 0, highRoll = high, lowRoll = low }
+        local iWon, iPay = ns.SameName(winner, S.me), ns.SameName(payer, S.me)
+        -- if we saw our own roll, it has to match what the host says
+        if (iWon and j.myRoll and j.myRoll ~= high) or (iPay and j.myRoll and j.myRoll ~= low) then
+            Print(("%s's Free For All result doesn't match your roll (%d), so it wasn't recorded."):format(Short(host), j.myRoll))
+            return
+        end
+        if iWon then
+            Record(info, true, payer, amount)
+            Print(("You won %s's Free For All! %s owes you %sg."):format(Short(host), Short(payer), Num(amount)))
+            ns.Sound("LOOT_WINDOW_COIN_SOUND")
+        elseif iPay then
+            Record(info, false, winner, amount)
+            Print(("You rolled lowest in %s's Free For All: you owe %s %sg."):format(Short(host), Short(winner), Num(amount)))
+        else
+            Print(("%s's Free For All: %s owes %s %sg. You're in the clear."):format(
+                Short(host), Short(payer), Short(winner), Num(amount)))
+        end
+        UI("RefreshStats")
+    end
 end
