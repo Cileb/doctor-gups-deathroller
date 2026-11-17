@@ -1,7 +1,16 @@
 -- Two-client simulation of Doctor Gup's Deathroller with a mocked WoW API (Lua 5.3).
 -- Run from the repository root:  lua tests/harness.lua .
 local ADDON_DIR = arg[1]
-local FILES = { "Core.lua", "Widgets.lua", "GameUI.lua", "ChallengeUI.lua", "TradeUI.lua", "StatsUI.lua", "OptionsUI.lua", "Minimap.lua" }
+-- load the same files, in the same order, as the game: from the TOC
+local FILES = {}
+do
+    local toc = assert(io.open((arg and arg[1] or ".") .. "/DoctorGupsDeathroller.toc"))
+    for line in toc:lines() do
+        local file = line:match("^%s*([%w_]+%.lua)%s*$")
+        if file then FILES[#FILES + 1] = file end
+    end
+    toc:close()
+end
 
 local clock = 100.0
 local timers = {}
@@ -1235,6 +1244,121 @@ local ok, err = xpcall(function()
     check(A.emotes[#A.emotes] == "PARTY: Lost a deathroll to Meudayr Darkpaw after 3 rolls.", "loser's party line: " .. tostring(A.emotes[#A.emotes]))
     A.inGroup = nil
     A.ns.SetSetting("announceChannel", "EMOTE")
+
+    print("== Free For All")
+    local function Line(name, r, hi)
+        local line = ("%s rolls %d (1-%d)"):format(name, r, hi)
+        for _, cl in ipairs(clients) do if cl.systemMessage then cl.systemMessage(line) end end
+        Tick(0.1)
+    end
+    local function Say(text, name) A.fire("CHAT_MSG_SAY", text, name .. "-CAMWOWUS1REALM3PvE"); Tick(0.05) end
+    local FF
+    local function MyRoll(r) A.forced = { r }; A.env.RandomRoll(1, A.ns.state.ffa.max); Tick(0.2) end
+    A.env.GupsDeathrollerFrame:Hide()
+    Tick(25)
+
+    -- setup window
+    A.env.SlashCmdList.GUPSDEATHROLLER("ffa"); Tick(0.1)
+    FF = A.env.GupsDeathrollerFFAFrame
+    check(FF and FF:IsShown() and FF.input:IsShown() and FF.right.text:GetText() == "Start Free For All" and FF.input:HasFocus(),
+        "/dr ffa opens the setup, cursor in the box")
+    FF.picks.buttons[2]:Fire("OnClick")
+    check(FF.input:GetText() == "150" and FF.big:GetText() == "150", "quick pick fills in 150")
+    local n0 = #A.emotes
+    FF.input:Fire("OnEnterPressed"); Tick(0.1)
+    local S2 = A.ns.state
+    check(S2.ffa and S2.ffa.phase == "join" and S2.ffa.max == 150 and #S2.ffa.players == 1, "Enter starts it; the host is in")
+    check(A.emotes[n0 + 1] == "EMOTE: starts a Free For All deathroll, 1-150! Lowest roll pays the highest the difference in gold. Type 1 in chat to join.",
+        "start emote (sent at once from Enter): " .. tostring(A.emotes[n0 + 1]))
+    check(not FF.right:IsEnabled() and FF.right.text:GetText() == "Waiting for players", "can't start rolling alone")
+    Say("1", "Zed Stranger"); Say("1", "Amy Latecomer"); Say("1", "Zed Stranger"); Say("hello", "Bob Talker")
+    check(#S2.ffa.players == 3 and FF.right:IsEnabled() and FF.right.text:GetText() == "Start rolling (3)",
+        "typing 1 joins (once); other chat doesn't")
+    Say(" -1 ", "Amy Latecomer")
+    check(#S2.ffa.players == 2, "-1 leaves")
+    Say("1", "Amy Latecomer")
+    A.fire("CHAT_MSG_PARTY", "1", "Pip Partymember")
+    check(#S2.ffa.players == 4, "party chat counts too")
+    Say("-1", "Pip Partymember")
+
+    -- rolling
+    FF.right:Fire("OnClick"); Tick(0.2)                     -- a click: the call goes through the Enter box
+    check(S2.ffa.phase == "roll" and A.emotes[#A.emotes] == "EMOTE: calls for rolls! Doctor, Zed and Amy: /roll 150 now.",
+        "Start rolling calls everyone by name: " .. tostring(A.emotes[#A.emotes]))
+    Say("1", "Late Joiner")
+    check(#S2.ffa.players == 3, "no joining once rolling has started")
+    Line("Zed Stranger", 120, 150)
+    Line("Zed Stranger", 149, 150)
+    Line("Amy Latecomer", 5, 100)
+    Line("Bob Talker", 1, 150)
+    check(S2.ffa.players[2].roll == 120 and not S2.ffa.players[3].roll, "first roll counts; wrong range and non-players ignored")
+    check(FF.rule:GetText():find("Your turn to roll too", 1, true) ~= nil, "the window tells the host to roll too")
+    Line("Amy Latecomer", 10, 150)
+    MyRoll(90)
+    check(S2.ffa.phase == "done" and S2.ffa.result.winner == "Zed Stranger" and S2.ffa.result.payer == "Amy Latecomer"
+        and S2.ffa.result.amount == 110, "everyone rolled: highest 120, lowest 10, 110g")
+    check(A.emotes[#A.emotes] == "EMOTE: Free For All result: Zed Stranger rolled 120 (highest), Amy Latecomer rolled 10 (lowest). Amy owes Zed 110g!",
+        "result emote: " .. tostring(A.emotes[#A.emotes]))
+    check(FF.big:GetText() == "110g" and FF.status:GetText():find("owes", 1, true) ~= nil, "window shows who owes what")
+    local DBf = A.ns.GetDB()
+    local h0 = #DBf.history
+    check(DBf.history[1].mode ~= "ffa", "host wasn't top or bottom: nothing recorded for them")
+
+    -- play again: the host wins this time
+    FF.left:Fire("OnClick"); Tick(0.2)
+    check(S2.ffa and S2.ffa.phase == "join" and S2.ffa.max == 150, "Play again starts a new one")
+    local zedBefore = A.ns.GetDebt("Zed Stranger")
+    Say("1", "Zed Stranger")
+    FF.right:Fire("OnClick"); Tick(0.2)
+    MyRoll(140); Line("Zed Stranger", 40, 150)
+    check(S2.ffa.result.winner == A.name and DBf.history[1].mode == "ffa" and DBf.history[1].won and DBf.history[1].wager == 100
+        and DBf.history[1].opp == "Zed Stranger", "host wins: recorded as a 100g win vs Zed")
+    check(A.ns.GetDebt("Zed Stranger") == zedBefore + 100, "Zed now owes the host 100g more")
+
+    -- ties for highest: just they re-roll; the amount uses the original rolls
+    FF.left:Fire("OnClick"); Tick(0.2)
+    Say("1", "Zed Stranger"); Say("1", "Amy Latecomer")
+    FF.right:Fire("OnClick"); Tick(0.2)
+    MyRoll(80); Line("Zed Stranger", 80, 150); Line("Amy Latecomer", 30, 150)
+    check(S2.ffa.phase == "tie" and A.emotes[#A.emotes] == "EMOTE: Tie for highest! Doctor and Zed: /roll 150 again.",
+        "top tie: those two roll again: " .. tostring(A.emotes[#A.emotes]))
+    Line("Amy Latecomer", 149, 150)
+    check(S2.ffa.phase == "tie", "someone not in the tie can't re-roll")
+    MyRoll(20); Line("Zed Stranger", 70, 150)
+    check(S2.ffa.phase == "done" and S2.ffa.result.winner == "Zed Stranger" and S2.ffa.result.amount == 50,
+        "Zed wins the re-roll; owed is still 80 - 30 = 50")
+
+    -- everyone ties: nobody owes
+    FF.left:Fire("OnClick"); Tick(0.2)
+    Say("1", "Zed Stranger")
+    FF.right:Fire("OnClick"); Tick(0.2)
+    MyRoll(66); Line("Zed Stranger", 66, 150)
+    check(S2.ffa.phase == "done" and S2.ffa.result.allTied, "everyone rolled the same: no result")
+
+    -- closing early, and a bottom tie that times out
+    FF.left:Fire("OnClick"); Tick(0.2)
+    Say("1", "Zed Stranger"); Say("1", "Amy Latecomer"); Say("1", "Idle Person")
+    FF.right:Fire("OnClick"); Tick(0.2)
+    MyRoll(100); Line("Zed Stranger", 5, 150); Line("Amy Latecomer", 5, 150)
+    FF.right:Fire("OnClick"); Tick(0.2)                        -- Close rolls: Idle never rolled
+    check(S2.ffa.phase == "tie", "Close rolls: Idle is out, Zed and Amy tie for lowest")
+    Line("Zed Stranger", 50, 150)
+    Tick(61)
+    check(S2.ffa.phase == "done" and S2.ffa.result.payer == "Amy Latecomer" and S2.ffa.result.amount == 95,
+        "bottom tie times out: the one who didn't re-roll pays")
+
+    -- nobody joins
+    FF:Hide(); Tick(0.1)
+    check(S2.ffa == nil, "closing the window clears a finished game")
+    A.env.SlashCmdList.GUPSDEATHROLLER("ffa 50"); Tick(0.1)
+    check(S2.ffa and S2.ffa.max == 50, "/dr ffa 50 starts straight away")
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge Meudayr Darkpaw"); Tick(0.1)
+    check(not A.ns.state.game or A.ns.state.game.state == "done", "can't start a duel during a Free For All")
+    Tick(61)
+    check(S2.ffa == nil and not FF:IsShown(), "nobody joined in 60 s: it's called off")
+    A.env.SlashCmdList.GUPSDEATHROLLER("ffa 50"); Tick(0.1)
+    A.env.SlashCmdList.GUPSDEATHROLLER("cancel"); Tick(0.1)
+    check(S2.ffa == nil and A.emotes[#A.emotes] == "EMOTE: calls off the Free For All.", "/dr cancel calls it off")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end

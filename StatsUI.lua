@@ -191,7 +191,12 @@ local function CreateStatsFrame()
                 (h.won and C.win or C.loss)[1], (h.won and C.win or C.loss)[2], (h.won and C.win or C.loss)[3])
             GameTooltip:AddLine(date("%A, %B %d %Y at %H:%M", h.t), 0.7, 0.7, 0.7)
             GameTooltip:AddLine(" ")
-            if h.seq and h.seq ~= "" then
+            if h.mode == "ffa" then
+                GameTooltip:AddLine(("Free For All 1-%s, %d players"):format(Num(h.start or 0), h.players or 0), 1, 1, 1)
+                if h.myRoll and h.theirRoll then
+                    GameTooltip:AddLine(("You rolled %d, they rolled %d"):format(h.myRoll, h.theirRoll), 0.8, 0.8, 0.8)
+                end
+            elseif h.seq and h.seq ~= "" then
                 GameTooltip:AddLine(FormatSequence(h), 1, 1, 1, true)
             else
                 GameTooltip:AddLine(("%d rolls (sequence not recorded)"):format(h.rolls or 0), 0.6, 0.6, 0.6)
@@ -295,6 +300,15 @@ local function CreateStatsFrame()
         GameTooltip:Show()
     end)
     f.open:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    f.ffa = W.Button(f, "Free For All", 110, 24, "neutral", function() ns.UI.ShowFFASetup() end)
+    f.ffa:SetPoint("LEFT", f.open, "RIGHT", 8, 0)
+    f.ffa:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Free For All")
+        GameTooltip:AddLine("Anyone nearby types 1 to join, everyone rolls, and the lowest roll pays the highest the difference. Nobody else needs the add-on.", 0.7, 0.7, 0.7, true)
+        GameTooltip:Show()
+    end)
+    f.ffa:HookScript("OnLeave", function() GameTooltip:Hide() end)
     f.note = W.Text(f, 10, C.muted, { justify = "RIGHT" })
     f.note:SetPoint("BOTTOMRIGHT", -14, 18)
     f.note:SetText(("Keeps your last %s games"):format(Num(ns.HISTORY_SIZE)))
@@ -364,7 +378,8 @@ RefreshHistory = function()
                     date("%m/%d  %H:%M", h.t),
                     h.won and W.Color("win", "WIN") or W.Color("loss", "LOSS"),
                     W.Color("opp", Short(h.opp)) .. (h.reason == "forfeit" and W.Color("muted", "  forfeit") or "")
-                        .. (h.noAddon and W.Color("muted", "  no add-on") or ""),
+                        .. (h.noAddon and W.Color("muted", "  no add-on") or "")
+                        .. (h.mode == "ffa" and W.Color("muted", "  free for all") or ""),
                     tostring(h.rolls or "-"),
                     wager > 0 and W.Gold(h.won and wager or -wager, true) or W.Color("muted", "-"),
                 },

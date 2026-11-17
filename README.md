@@ -24,8 +24,10 @@ You can also push a tag yourself instead: `git tag v1.1.1 && git push origin v1.
 | File | What it does |
 | --- | --- |
 | `Core.lua` | Rules, add-on messages, roll reading, stats, debts, slash commands |
+| `FFA.lua` | Free For All: joining by typing 1, rolls, ties, results |
 | `Widgets.lua` | The shared look: panels, buttons, lists, inputs |
 | `GameUI.lua` | Game window, challenge popup, dice reveal |
+| `FFAUI.lua` | Free For All window |
 | `ChallengeUI.lua` | Wager window and version check |
 | `TradeUI.lua` | Debt banner on the trade window |
 | `StatsUI.lua` | Stats window: Overview, History, Debts |

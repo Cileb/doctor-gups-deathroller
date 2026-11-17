@@ -631,6 +631,8 @@ local function Emote(text, chatType, quietly)
     return true, "queued"
 end
 
+ns.Emote, ns.AdjustDebt, ns.NewId = Emote, AdjustDebt, NewId
+
 local function WagerText(wager, fmt)
     return wager > 0 and fmt:format(Num(wager)) or ""
 end
@@ -729,6 +731,7 @@ end
 -- opts.double: this is a double-or-nothing rematch (shown to the other player)
 function ns.StartChallenge(target, wager, opts)
     local max = ns.START_ROLL
+    if ns.FFA_IsActive and ns.FFA_IsActive() then Print("Finish your Free For All first."); return end
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
         return
@@ -771,6 +774,7 @@ end
 -- rematches), nil = an open challenge anyone nearby can take.
 function ns.StartOpenChallenge(wager, only, opts)
     local max = ns.START_ROLL
+    if ns.FFA_IsActive and ns.FFA_IsActive() then Print("Finish your Free For All first."); return end
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
         return
@@ -825,6 +829,7 @@ end
 
 -- Open the wager window for a player (from /dr with a target, or /dr challenge Name).
 function ns.OpenChallenge(target, wager)
+    if ns.FFA_IsActive and ns.FFA_IsActive() then Print("Finish your Free For All first."); return end
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
         UI("Update")
@@ -1209,6 +1214,7 @@ local function Help()
     Print("commands")
     print("   /dr (or /gup)  - with a player targeted: challenge them (choose your wager)")
     print("   /dr challenge First Last  - challenge someone who isn't targeted")
+    print("   /dr ffa [roll]  - Free For All: anyone types 1 to join, everyone rolls, lowest pays highest the difference")
     print("   /dr open [gold]  - open challenge: the first player nearby to /roll 100 takes it (no add-on needed)")
     print("   On your turn, type /roll N in the window's box (or in chat) and press Enter.")
     print("   /dr forfeit   - give up / cancel your challenge")
@@ -1249,10 +1255,14 @@ OnSlash = function(input)
         end
         if not target then Print("Target a player and type /dr, or use /dr challenge First Last."); return end
         ns.OpenChallenge(target, wager)
+    elseif cmd == "ffa" or cmd == "freeforall" then
+        local n = tonumber(((args[2] or ""):gsub("[gG]$", "")))
+        if n then ns.FFA_Start(n) else UI("ShowFFASetup") end
     elseif cmd == "open" then
         ns.OpenChallenge(nil, tonumber(((args[2] or ""):gsub("[gG]$", ""))))
     elseif cmd == "forfeit" or cmd == "ff" or cmd == "cancel" then
-        ns.Forfeit()
+        if ns.FFA_IsActive() and not (S.game and S.game.state ~= "done") then ns.FFA_Cancel()
+        else ns.Forfeit() end
     elseif cmd == "show" then
         if S.game then UI("Update") else Print("No deathroll in progress.") end
     elseif cmd == "options" or cmd == "config" or cmd == "settings" or cmd == "o" then
@@ -1294,6 +1304,10 @@ events:RegisterEvent("CHAT_MSG_ADDON")
 for _, e in ipairs({ "TRADE_SHOW", "TRADE_CLOSED", "TRADE_MONEY_CHANGED", "TRADE_ACCEPT_UPDATE", "UI_INFO_MESSAGE" }) do
     events:RegisterEvent(e)
 end
+-- typing "1" to join a Free For All (nearby: say/yell; group chat works too)
+local JOIN_CHAT = { CHAT_MSG_SAY = true, CHAT_MSG_YELL = true, CHAT_MSG_PARTY = true,
+    CHAT_MSG_PARTY_LEADER = true, CHAT_MSG_RAID = true, CHAT_MSG_RAID_LEADER = true }
+for e in pairs(JOIN_CHAT) do events:RegisterEvent(e) end
 for _, e in ipairs({ "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }) do
     pcall(events.RegisterEvent, events, e)          -- tells us when WoW refuses an emote
 end
@@ -1328,11 +1342,18 @@ events:SetScript("OnEvent", function(_, event, ...)
             probe.status = "offline"
             UI("ProbeUpdated", probe)
         end
+        if ROLL_PATTERN and ns.FFA_IsActive and ns.FFA_IsActive() and not IsSecret(msg) then
+            local who, roll, lo, hi = ParseRoll(msg)
+            if who then ns.FFA_OnRoll(who, roll, lo, hi) end
+        end
         if not S.game or not ROLL_PATTERN then return end
         if IsSecret(msg) then Debug("system message is a secret value; can't read it"); return end
         local who, roll, lo, hi = ParseRoll(msg)
         Debug(("system: %s  ->  %s"):format(msg, who and ("%s %d (%d-%d)"):format(who, roll, lo, hi) or "not a roll"))
         if who then HandleRoll(who, roll, lo, hi, true, msg) end
+
+    elseif JOIN_CHAT[event] then
+        if ns.FFA_OnChat then ns.FFA_OnChat(...) end     -- "1" to join a Free For All
 
     elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
         ns.OnActionBlocked(...)

@@ -1,3 +1,12 @@
+## 1.5.0
+
+- **New game mode: Free For All.** Type `/dr ffa` (or click **Free For All** in the stats window), pick how high everyone rolls (for example 150), and start.
+  - Your character emotes the game, and anyone nearby **types 1 in chat to join** (-1 to leave). Nobody else needs the add-on.
+  - When you click **Start rolling** (or after 60 seconds), your character calls everyone in by name to `/roll 150`. Each player's first roll counts.
+  - When everyone has rolled (or after 60 seconds, or when you click **Close rolls**), **the lowest roller pays the highest roller the difference**. For example, 120 and 10 means 110g.
+  - **Ties** for highest or lowest: just the tied players roll again to decide who wins or pays. The amount still uses the original rolls. If everyone rolls the same, nobody owes anything.
+  - The window lists everyone and their rolls as they come in, then shows who owes whom. If you were the winner or the payer, it goes into your stats, history (marked "free for all") and debts.
+
 ## 1.4.2
 
 - **The "Press Enter to post" box is now centred over the game window,** wherever you've moved it, instead of the middle of the screen. It still sits in front of everything.

@@ -9,8 +9,10 @@
 ## X-Curse-Project-ID: 1803451
 
 Core.lua
+FFA.lua
 Widgets.lua
 GameUI.lua
+FFAUI.lua
 ChallengeUI.lua
 TradeUI.lua
 StatsUI.lua
