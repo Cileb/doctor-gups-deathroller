@@ -1,3 +1,8 @@
+## 1.4.1
+
+- **No more "Press Enter" prompt for challenge announcements.** You already turn these on or off in Options ("Announce challenges"), so challenge, accept, double-or-nothing and call-off emotes no longer ask. After a click, they go out on your next key press outside a text box, such as moving. They never take Enter, so they can't get in the way of typing /roll 100.
+- **The "Press Enter to post" box now appears in the centre of the screen,** in front of everything. It's still used for result announcements and open challenges.
+
 ## 1.4.0
 
 - **Announce results to Emote, Party or Guild.** The result screen's Announce button now has an arrow that opens a short menu: **Emote** (people nearby), **Party** or **Guild**. Your pick is remembered, and the button shows where it goes ("Announce: Party"). Party and guild messages are in your own voice ("Won a deathroll against Meudayr Darkpaw for 25g in 6 rolls!"), and milestones come along too. In a raid, Party goes to raid chat. Channels you can't use right now are greyed out with the reason. The default is also under Options > Announcements > "Results go to".

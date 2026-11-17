@@ -510,6 +510,7 @@ end
 local lastEmote, lastLockdownNote = 0, 0
 local emoteBlocked, emoting, emoteWasBlocked = false, false, false
 local queue = {}                       -- { text, t } waiting for Enter
+local quiet = {}                       -- quiet emotes waiting for any key (see below)
 ns.EMOTE_WAIT = 30                     -- unposted announcements are dropped after this
 
 -- Set while handling a key press (slash commands, Enter in our windows).
@@ -540,7 +541,7 @@ function ns.OnActionBlocked(addon)
     emoteWasBlocked = true
     if not emoteBlocked then
         emoteBlocked = true
-        wipe(queue)
+        wipe(queue); wipe(quiet)
         UI("UpdateEmotePrompt")
         Print("WoW blocked an announcement from this add-on, so it won't post emotes again until you /reload. Your games aren't affected.")
     end
@@ -580,10 +581,29 @@ function ns.SkipEmotes()
     UI("UpdateEmotePrompt")
 end
 
+-- Quiet emotes: challenge / accept / call-off courtesy lines. You already chose to
+-- announce these in Options, so they never ask; after a click they just go out on
+-- your next key press that isn't typing in a box (moving, a keybind...). The
+-- watcher passes every key on, so it never gets in the way of /roll.
+local quietWatcher = CreateFrame("Frame")
+ns.quietWatcher = quietWatcher
+local function WatchQuiet(on)
+    if InCombatLockdown and InCombatLockdown() then return end   -- keyboard setup is off-limits in combat
+    quietWatcher:EnableKeyboard(on)
+    if on then quietWatcher:SetPropagateKeyboardInput(true) end
+end
+quietWatcher:SetScript("OnKeyDown", function()
+    while quiet[1] and GetTime() - quiet[1].t >= ns.EMOTE_WAIT do table.remove(quiet, 1) end
+    local item = table.remove(quiet, 1)              -- one per key press
+    if item and not emoteBlocked then SendNow(item.text, item.chatType) end
+    if not quiet[1] then WatchQuiet(false) end
+end)
+
 -- Returns true if sent or waiting for Enter (second value "queued"), or false plus a
 -- reason: "combat", "lockdown", "blocked".
 -- chatType: EMOTE (default), PARTY, RAID or GUILD. Forever wants a key press for all of them.
-local function Emote(text, chatType)
+-- quietly: never show the Enter bar (see quiet emotes above).
+local function Emote(text, chatType, quietly)
     chatType = chatType or "EMOTE"
     if emoteBlocked then return false, "blocked" end
     if InCombatLockdown and InCombatLockdown() then return false, "combat" end
@@ -597,6 +617,12 @@ local function Emote(text, chatType)
     if ns.keyPress or (chatType == "EMOTE" and IsInInstance and IsInInstance()) then
         local ok = SendNow(text, chatType)
         return ok, (not ok) and "blocked" or nil
+    end
+    if quietly then
+        quiet[#quiet + 1] = { text = text, chatType = chatType, t = GetTime() }
+        lastEmote = GetTime()
+        WatchQuiet(true)
+        return true, "queued"
     end
     queue[#queue + 1] = { text = text, chatType = chatType, t = GetTime() }
     lastEmote = GetTime()
@@ -613,11 +639,11 @@ local function AnnounceChallenge(g)
     if not ns.Setting("announceChallenges") then return end
     if g.double then
         -- double or nothing always gets its own line, even right after the last game
-        Emote(("goes double or nothing against %s for %sg!"):format(Short(g.opponent), Num(g.wager)))
+        Emote(("goes double or nothing against %s for %sg!"):format(Short(g.opponent), Num(g.wager)), nil, true)
         return
     end
     if GetTime() - lastEmote < 20 then return end           -- don't spam rematches
-    Emote(("challenges %s to a deathroll%s!"):format(Short(g.opponent), WagerText(g.wager, " for %sg")))
+    Emote(("challenges %s to a deathroll%s!"):format(Short(g.opponent), WagerText(g.wager, " for %sg")), nil, true)
 end
 
 -- The "Announce" button on the result screen.
@@ -847,7 +873,7 @@ function ns.Forfeit()
     if not g then return end
     if g.state == "pending" then CancelChallenge(); return end
     if g.state == "open" then
-        Emote("calls off the deathroll.")             -- people saw the challenge, so say so
+        Emote("calls off the deathroll.", nil, true)             -- people saw the challenge, so say so
         Print("Challenge cancelled.")
         S.game = nil
         UI("Update")
@@ -875,7 +901,7 @@ end
 function ns.EndWithoutResult()
     local g = S.game
     if not g then return end
-    Emote(("calls off the deathroll with %s."):format(Short(g.opponent)))
+    Emote(("calls off the deathroll with %s."):format(Short(g.opponent)), nil, true)
     Print(("Ended with no result: %s stopped rolling."):format(Short(g.opponent)))
     S.game = nil
     UI("Update")
@@ -915,9 +941,9 @@ function ns.AcceptInvite(announce)
     if announce == nil then announce = ns.Setting("announceChallenges") end
     if announce then
         if inv.double then
-            Emote(("accepts %s's double or nothing for %sg!"):format(Short(inv.from), Num(inv.wager)))
+            Emote(("accepts %s's double or nothing for %sg!"):format(Short(inv.from), Num(inv.wager)), nil, true)
         else
-            Emote(("accepts %s's deathroll challenge%s!"):format(Short(inv.from), WagerText(inv.wager, " for %sg")))
+            Emote(("accepts %s's deathroll challenge%s!"):format(Short(inv.from), WagerText(inv.wager, " for %sg")), nil, true)
         end
     end
     ProximityTip()

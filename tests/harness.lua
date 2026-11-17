@@ -238,6 +238,9 @@ local function Tick(seconds)
             -- the player presses Enter on the "Press Enter to post" bar when it shows
             local bar = c.env and c.env.GupsDeathrollerEmotePrompt
             if bar and bar:IsVisible() and c.autoKeys ~= false then bar:Fire("OnKeyDown", "ENTER") end
+            -- ...and moves around, which lets quiet challenge emotes go out
+            local qw = c.ns and c.ns.quietWatcher
+            if qw and qw._kb and c.autoKeys ~= false then qw:Fire("OnKeyDown", "W") end
         end
     end
 end
@@ -1065,7 +1068,7 @@ local ok, err = xpcall(function()
     check(bar and bar:IsShown() and bar.preview:GetText():find("issues an open deathroll challenge for 1g!", 1, true) ~= nil,
         "the Enter bar shows what will be posted")
     local GFd = A.env.GupsDeathrollerFrame
-    check(bar:GetParent() == GFd and select(2, bar:GetPoint()) == GFd, "the bar docks under the game window")
+    check(bar:GetParent() == A.env.UIParent and bar:GetPoint() == "CENTER", "the bar sits in the centre of the screen")
     bar:Fire("OnKeyDown", "W")
     check(#A.emotes == n0 and bar:IsShown() and bar._propagate == true, "other keys pass through and post nothing")
     bar:Fire("OnKeyDown", "ENTER")
@@ -1079,26 +1082,34 @@ local ok, err = xpcall(function()
     A.env.GupsDeathrollerChallengeFrame.input:Fire("OnEnterPressed"); Tick(0.1)
     check(#A.emotes == n0 + 1 and A.emotes[#A.emotes]:find("for 2g!") ~= nil and not bar:IsShown(),
         "pressing Enter in the window emotes at once")
-    -- Esc skips; two waiting emotes show as 1 of 2
+    -- the call-off is a quiet emote: no bar, it goes out on your next (any) key press
+    A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
+    check(not bar:IsShown() and A.ns.quietWatcher._kb and A.ns.quietWatcher._propagate == true,
+        "call-off: no Enter bar, waits quietly and passes every key on")
+    A.ns.quietWatcher:Fire("OnKeyDown", "W")
+    check(A.emotes[#A.emotes] == "EMOTE: calls off the deathroll." and not A.ns.quietWatcher._kb, "any key sends it")
+    -- Esc skips; the x skips too
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
+    n0 = #A.emotes
+    bar:Fire("OnKeyDown", "ESCAPE")
+    check(#A.emotes == n0 and not bar:IsShown(), "Esc skips it")
+    A.ns.quietWatcher:Fire("OnKeyDown", "W")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)
+    A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
+    A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
+    bar.close:Fire("OnClick")
+    check(not bar:IsShown() and #A.emotes == n0 + 1, "the x skips it")
+    -- unposted ones expire
     A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
     A.env.SlashCmdList.GUPSDEATHROLLER("open"); Tick(0.1)
     A.env.GupsDeathrollerChallengeFrame.go:Fire("OnClick"); Tick(0.1)
-    check(bar:IsShown() and bar.count:GetText() == "1 of 2", "two waiting: shows 1 of 2")
+    check(bar:IsShown(), "waiting again")
     n0 = #A.emotes
-    bar:Fire("OnKeyDown", "ESCAPE")
-    check(#A.emotes == n0 and bar:IsShown() and bar.count:GetText() == "", "Esc skips the first")
-    bar.close:Fire("OnClick")
-    check(not bar:IsShown() and #A.emotes == n0, "the x skips the rest")
-    -- unposted ones expire
     A.env.GupsDeathrollerFrame.cancel:Fire("OnClick"); Tick(0.1)
-    check(bar:IsShown(), "call-off waits too")
-    check(bar:IsShown() and bar:GetParent() ~= GFd, "window closed: the bar stays, standing alone")
-    GFd:Show()
-    check(bar:GetParent() == GFd, "window reopened: docks back under it")
-    GFd:Hide()
     Tick(31)
     check(not bar:IsShown(), "after 30 s the bar goes away")
-    bar:Fire("OnKeyDown", "ENTER")
+    bar:Fire("OnKeyDown", "ENTER"); A.ns.quietWatcher:Fire("OnKeyDown", "W")
     check(#A.emotes == n0, "and nothing posts late")
     -- inside an instance a click is enough
     A.inInstance = true

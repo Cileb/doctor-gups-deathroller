@@ -67,10 +67,6 @@ local function CreateGameFrame()
     f:SetScript("OnHide", function()
         if f.input then f.input:ClearFocus() end      -- give the keyboard back
         ns.ClearFinished()
-        if ns.UI.UpdateEmotePrompt then ns.UI.UpdateEmotePrompt() end   -- a waiting announcement stays put
-    end)
-    f:SetScript("OnShow", function()
-        if ns.UI.UpdateEmotePrompt then ns.UI.UpdateEmotePrompt() end   -- dock it back under the window
     end)
 
 
@@ -842,8 +838,7 @@ end)
 ------------------------------------------------------------------------
 -- "Press Enter to post" tray. On Forever an add-on can only emote after a key
 -- press (a click doesn't count), so after a click the announcement waits here.
--- It docks under the game window as part of it (moves, scales and hides with
--- it). If the window isn't open, it stands alone where the window was.
+-- It sits in the centre of the screen, in front of everything.
 -- Only Enter and Esc are taken; every other key keeps working as normal.
 ------------------------------------------------------------------------
 local prompt
@@ -867,13 +862,13 @@ local function CreatePrompt()
     f:SetSize(320, TRAY_H)
     f:SetFrameStrata("DIALOG")
     f:EnableMouse(true)
-    -- a tray: a shade darker than the window, so it reads as a drawer pulled out of it
-    f.bg = W.Tex(f, C.header)
+    -- same wood and brass as the other windows: brass outline, a fine inner rail
+    f.bg = W.Tex(f, C.bg)
     f.bg:SetAllPoints()
     W.Border(f)
-    f.seam = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.6 }, "ARTWORK")   -- brass lip where it joins
-    f.seam:SetHeight(1)
-    f.seam:SetPoint("TOPLEFT", 1, -1); f.seam:SetPoint("TOPRIGHT", -1, -1)
+    local inner = CreateFrame("Frame", nil, f)
+    inner:SetPoint("TOPLEFT", 1, -1); inner:SetPoint("BOTTOMRIGHT", -1, 1)
+    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
 
     f.caption = W.Text(f, 10, C.gold)
     f.caption:SetPoint("TOPLEFT", 12, -10)
@@ -948,38 +943,19 @@ local function CreatePrompt()
     return f
 end
 
--- Dock under the game window, or stand alone where it was.
+-- Centre of the screen, in front of everything: it's a quick yes/no.
 local function PlacePrompt()
     prompt:ClearAllPoints()
-    if frame and frame:IsShown() then
-        prompt:SetParent(frame)
-        prompt:SetFrameLevel(frame:GetFrameLevel() + 20)
-        prompt:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 1)     -- overlap the window's bottom edge
-        prompt:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, 1)
-        prompt:SetScale(1)                                         -- inherits the window's scale
-        frame:SetClampRectInsets(0, 0, 0, -(TRAY_H - 1))         -- keep the tray on screen too
-        prompt.seam:Show()
-    else
-        prompt:SetParent(UIParent)
-        prompt:SetFrameStrata("DIALOG")
-        prompt:SetScale(ns.Setting("scale") or 1)
-        local x, top = frame and frame:GetCenter(), frame and frame:GetTop()
-        if type(x) == "number" and type(top) == "number" then
-            prompt:SetPoint("TOP", UIParent, "BOTTOMLEFT", x, top)   -- where the window just was
-        else
-            prompt:SetPoint("TOP", UIParent, "TOP", 0, -160)
-        end
-        prompt.seam:Hide()
-    end
+    prompt:SetParent(UIParent)
+    prompt:SetFrameStrata("FULLSCREEN_DIALOG")
+    prompt:SetScale(ns.Setting("scale") or 1)
+    prompt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 end
 
 local function UpdateEmotePrompt()
     local text, count, expires, chatType = ns.PendingEmote()
     if not text then
-        if prompt and prompt:IsShown() then
-            prompt:Hide()
-            if frame then frame:SetClampRectInsets(0, 0, 0, 0) end
-        end
+        if prompt and prompt:IsShown() then prompt:Hide() end
         return
     end
     prompt = prompt or CreatePrompt()
