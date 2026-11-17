@@ -46,6 +46,7 @@ function Methods:GetText() return self._text end
 function Methods:Enable() self._enabled = true; self:Fire("OnEnable") end
 function Methods:Disable() self._enabled = false; self:Fire("OnDisable") end
 function Methods:IsEnabled() return self._enabled end
+function Methods:SetEnabled(on) if on then self:Enable() else self:Disable() end end
 function Methods:HasFocus() return self._focus or false end
 function Methods:SetFocus() self._focus = true; self:Fire("OnEditFocusGained") end
 function Methods:ClearFocus() if self._focus then self._focus = false; self:Fire("OnEditFocusLost") end end
@@ -114,6 +115,7 @@ local function NewClient(fullName, shard)
     env.GetTime = function() return clock end
     env.C_Timer = { After = After }
     env.UIParent = c.NewWidget("Frame")
+    env.UIParent._shown = true
     env.GameTooltip = c.NewWidget("GameTooltip")
     env.DEFAULT_CHAT_FRAME = c.NewWidget("ScrollingMessageFrame")
     env.CreateFrame = function(kind, name, parent)
@@ -129,7 +131,9 @@ local function NewClient(fullName, shard)
     env.RANDOM_ROLL_RESULT = "%s rolls %d (%d-%d)"
     env.BreakUpLargeNumbers = function(n) return tostring(n) end
     env.ChatTypeInfo = { SYSTEM = { r = 1, g = 1, b = 0 } }
-    env.IsInGroup = function() return false end
+    env.IsInGroup = function() return c.inGroup == true end
+    env.IsInRaid = function() return c.inRaid == true end
+    env.IsInGuild = function() return c.inGuild == true end
     env.IsInInstance = function() return c.inInstance == true end
     env.wipe = env.wipe or function(t) for k in pairs(t) do t[k] = nil end return t end
     env.IsShiftKeyDown = function() return false end
@@ -1142,6 +1146,84 @@ local ok, err = xpcall(function()
     local heads = 0
     for _ = 1, 200 do if realFlipB() then heads = heads + 1 end end
     check(heads > 60 and heads < 140, "real coin flip is roughly even (" .. heads .. "/200)")
+
+    print("== announcing to emote, party or guild")
+    local AF2 = A.env.GupsDeathrollerFrame
+    local function WinOne(wager)
+        B.ns.CoinFlip = function() return false end
+        Tick(25)
+        A.target = B.name
+        A.env.SlashCmdList.GUPSDEATHROLLER("challenge " .. wager); GoChallenge(A); Tick(0.2)
+        B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+        A.forced = { 30 }; TypeInBox(A, "/roll 100"); Tick(4)
+        B.forced = { 1 }; TypeInBox(B, "/roll 30"); Tick(4)
+        return A.ns.state.game
+    end
+    local g = WinOne(15)
+    check(g.state == "done" and g.won, "A wins")
+    check(AF2.announce.text:GetText() == "Announce" and AF2.announce:IsEnabled() and AF2.announceMore:IsShown(),
+        "default: Announce (emote) with a channel arrow")
+    AF2.announceMore:Fire("OnClick")
+    local menu = AF2.announceMenu
+    check(menu:IsShown() and menu.rows[1].mark:IsShown() and not menu.rows[2]:IsEnabled() and not menu.rows[3]:IsEnabled(),
+        "menu: Emote is current; Party and Guild greyed out when you're in neither")
+    check(menu.rows[2].note:GetText() == "You're not in a group." and menu.rows[3].note:GetText() == "You're not in a guild.",
+        "greyed rows say why")
+    menu:Hide()
+    A.inGroup, A.inGuild = true, true
+    AF2.announceMore:Fire("OnClick")
+    check(menu.rows[2]:IsEnabled() and menu.rows[3]:IsEnabled() and menu.rows[2].note:GetText() == "To your party",
+        "in a group and a guild: all three available")
+    local n0 = #A.emotes
+    menu.rows[2]:Fire("OnClick"); Tick(0.2)
+    check(A.emotes[n0 + 1] == "PARTY: Won a deathroll against Meudayr Darkpaw for 15g in 2 rolls!",
+        "party line is in your own voice: " .. tostring(A.emotes[n0 + 1]))
+    check(not menu:IsShown() and AF2.announce.text:GetText() == "Sent to Party" and not AF2.announce:IsEnabled(),
+        "after: Sent to Party")
+    check(A.ns.Setting("announceChannel") == "PARTY", "the choice is remembered")
+
+    g = WinOne(0)
+    check(AF2.announce.text:GetText() == "Announce: Party", "next game: the button says where it goes")
+    A.autoKeys = false
+    AF2.announce:Fire("OnClick"); Tick(0.1)
+    local bar2 = A.env.GupsDeathrollerEmotePrompt
+    check(bar2:IsShown() and bar2.caption:GetText() == "ANNOUNCE TO YOUR PARTY?"
+        and bar2.preview:GetText():find("[Party] Doctor Gup:", 1, true) ~= nil, "the Enter bar shows it as a party message")
+    bar2:Fire("OnKeyDown", "ENTER")
+    check(A.emotes[#A.emotes] == "PARTY: Won a deathroll against Meudayr Darkpaw in 2 rolls!", "Enter sends it to party")
+    A.autoKeys = nil
+    A.inRaid = true
+    g = WinOne(0)
+    AF2.announce:Fire("OnClick"); Tick(0.2)
+    check(A.emotes[#A.emotes]:sub(1, 6) == "RAID: ", "in a raid, Party goes to raid chat")
+    A.inRaid = nil
+
+    g = WinOne(0)
+    AF2.announceMore:Fire("OnClick")
+    menu.rows[3]:Fire("OnClick"); Tick(0.2)
+    check(A.emotes[#A.emotes] == "GUILD: Won a deathroll against Meudayr Darkpaw in 2 rolls!", "guild works too")
+    A.inGroup, A.inGuild = nil, nil
+    g = WinOne(0)
+    check(AF2.announce.text:GetText() == "Announce: Guild" and not AF2.announce:IsEnabled() and AF2.announceMore:IsEnabled(),
+        "left the guild: Announce greys out, the arrow still lets you pick Emote")
+    AF2.announceMore:Fire("OnClick")
+    menu.rows[1]:Fire("OnClick"); Tick(0.2)
+    check(A.emotes[#A.emotes - 1] == "EMOTE: wins a deathroll against Meudayr Darkpaw in 2 rolls!" and A.ns.Setting("announceChannel") == "EMOTE",
+        "back to Emote: third person, as before")
+    -- loser's party line (B can't emote: it's flagged blocked from an earlier test)
+    B.ns.CoinFlip = function() return false end
+    Tick(25)
+    A.env.SlashCmdList.GUPSDEATHROLLER("challenge 0"); GoChallenge(A); Tick(0.2)
+    B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.2)
+    A.forced = { 30 }; TypeInBox(A, "/roll 100"); Tick(4)
+    B.forced = { 10 }; TypeInBox(B, "/roll 30"); Tick(4)
+    A.forced = { 1 }; TypeInBox(A, "/roll 10"); Tick(4)
+    A.inGroup = true
+    A.ns.SetSetting("announceChannel", "PARTY")
+    AF2.announce:Fire("OnClick"); Tick(0.2)
+    check(A.emotes[#A.emotes] == "PARTY: Lost a deathroll to Meudayr Darkpaw after 3 rolls.", "loser's party line: " .. tostring(A.emotes[#A.emotes]))
+    A.inGroup = nil
+    A.ns.SetSetting("announceChannel", "EMOTE")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end

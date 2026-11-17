@@ -1,3 +1,8 @@
+## 1.4.0
+
+- **Announce results to Emote, Party or Guild.** The result screen's Announce button now has an arrow that opens a short menu: **Emote** (people nearby), **Party** or **Guild**. Your pick is remembered, and the button shows where it goes ("Announce: Party"). Party and guild messages are in your own voice ("Won a deathroll against Meudayr Darkpaw for 25g in 6 rolls!"), and milestones come along too. In a raid, Party goes to raid chat. Channels you can't use right now are greyed out with the reason. The default is also under Options > Announcements > "Results go to".
+- Challenge, accept and open-challenge announcements stay as emotes, since they're for people nearby. A forfeit against someone without the add-on is always an emote, so they see it.
+
 ## 1.3.2
 
 - **The "Press Enter to post" bar is now part of the game window.** It slides out under the window like a drawer, and moves, scales and closes with it. If you close the window while an announcement is waiting, the bar stays where the window was. Enter posts, Esc skips (a second Esc closes the window), and the x dismisses it with the mouse.

@@ -91,13 +91,18 @@ local function BuildContent(parent, left, top)
     local annChal = Check(parent, "announceChallenges", "Announce challenges",
         "Your character emotes when you challenge someone or accept a challenge, so people nearby can watch.")
     local annRes = Check(parent, "announceResults", "Announce button on results",
-        "Adds an Announce button to the result screen. Click it to emote who won to everyone nearby.")
+        "Adds an Announce button to the result screen, to share who won. Its arrow picks Emote, Party or Guild for that game.")
+    local annWhere = Choice(parent, "announceChannel", "Results go to", {
+        { value = "EMOTE", label = "Emote", width = 52 },
+        { value = "PARTY", label = "Party", width = 48 },
+        { value = "GUILD", label = "Guild", width = 48 },
+    })
     local annMile = Check(parent, "announceMilestones", "Include milestones",
         "Adds streaks, your biggest pot and other milestones to that announcement.")
 
     Stack(parent, left, top, {
         { turn }, { autoFocus, 12 }, { prefill, 6 },
-        { ann, 18 }, { annChal, 12 }, { annRes, 6 }, { annMile, 6 },
+        { ann, 18 }, { annChal, 12 }, { annRes, 6 }, { annWhere, 8 }, { annMile, 8 },
     })
 
     -- Right column

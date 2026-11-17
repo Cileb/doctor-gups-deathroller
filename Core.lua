@@ -48,6 +48,7 @@ ns.DEFAULTS = {
     announceChallenges = false, -- emote when you challenge someone or accept a challenge
     announceResults    = true,  -- show an "Announce" button on the result screen
     announceMilestones = true,  -- include milestones (streaks, biggest pot, ...) in that announcement
+    announceChannel    = "EMOTE", -- where results go: EMOTE (people nearby), PARTY or GUILD
     tips          = true,      -- helpful tips in chat
     minimap       = true,      -- show the minimap button
     minimapAngle  = 215,       -- degrees around the minimap
@@ -369,18 +370,22 @@ local function RecordResult(g)
     if g.won then
         local st = s.streak
         if st == 3 or (st >= 5 and st % 5 == 0) then
-            m[#m + 1] = { label = st .. "-win streak", emote = ("is on a %d-win deathroll streak!"):format(st) }
+            m[#m + 1] = { label = st .. "-win streak", emote = ("is on a %d-win deathroll streak!"):format(st),
+                          chat = ("On a %d-win deathroll streak!"):format(st) }
         end
         if s.wins == 1 or s.wins == 10 or s.wins == 25 or (s.wins >= 50 and s.wins % 50 == 0) then
             m[#m + 1] = { label = s.wins == 1 and "First deathroll win" or (s.wins .. " wins"),
-                          emote = s.wins == 1 and "wins their first ever deathroll!" or ("has now won %d deathrolls!"):format(s.wins) }
+                          emote = s.wins == 1 and "wins their first ever deathroll!" or ("has now won %d deathrolls!"):format(s.wins),
+                          chat = s.wins == 1 and "My first ever deathroll win!" or ("That's %d deathroll wins!"):format(s.wins) }
         end
         if g.wager > 0 and g.wager > previousBiggest and previousBiggest > 0 then
-            m[#m + 1] = { label = "Biggest pot yet", emote = ("just won their biggest pot yet: %sg!"):format(Num(g.wager)) }
+            m[#m + 1] = { label = "Biggest pot yet", emote = ("just won their biggest pot yet: %sg!"):format(Num(g.wager)),
+                          chat = ("My biggest pot yet: %sg!"):format(Num(g.wager)) }
         end
         if o.w == 1 and o.l >= 3 then
             m[#m + 1] = { label = "First win vs " .. FirstName(oppName),
-                          emote = ("finally beats %s after %d losses!"):format(oppName, o.l) }
+                          emote = ("finally beats %s after %d losses!"):format(oppName, o.l),
+                          chat = ("Finally beat %s after %d losses!"):format(oppName, o.l) }
         end
     end
     g.milestones = m
@@ -526,7 +531,7 @@ function ns.PendingEmote()
     PurgeStale()
     local item = queue[1]
     if not item then return nil, 0 end
-    return item.text, #queue, item.t + ns.EMOTE_WAIT
+    return item.text, #queue, item.t + ns.EMOTE_WAIT, item.chatType
 end
 
 -- Called from the ADDON_ACTION_BLOCKED / _FORBIDDEN events, which fire during the call.
@@ -541,11 +546,11 @@ function ns.OnActionBlocked(addon)
     end
 end
 
-local function SendNow(text)
+local function SendNow(text, chatType)
     local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
     if not send then return false end
     emoting, emoteWasBlocked = true, false
-    local ok = pcall(send, text, "EMOTE")
+    local ok = pcall(send, text, chatType or "EMOTE")
     emoting = false
     if emoteWasBlocked then ok = false end
     if not ok then Debug("emote blocked: " .. text) end
@@ -560,7 +565,7 @@ function ns.EmotePromptKey(key)
     if not queue[1] then UI("UpdateEmotePrompt"); return false end
     if key == "ENTER" or key == "NUMPADENTER" then
         local item = table.remove(queue, 1)        -- one emote per key press
-        if not emoteBlocked then SendNow(item.text) end
+        if not emoteBlocked then SendNow(item.text, item.chatType) end
     elseif key == "ESCAPE" then
         table.remove(queue, 1)
     else
@@ -577,7 +582,9 @@ end
 
 -- Returns true if sent or waiting for Enter (second value "queued"), or false plus a
 -- reason: "combat", "lockdown", "blocked".
-local function Emote(text)
+-- chatType: EMOTE (default), PARTY, RAID or GUILD. Forever wants a key press for all of them.
+local function Emote(text, chatType)
+    chatType = chatType or "EMOTE"
     if emoteBlocked then return false, "blocked" end
     if InCombatLockdown and InCombatLockdown() then return false, "combat" end
     if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown() then
@@ -587,11 +594,11 @@ local function Emote(text)
         end
         return false, "lockdown"
     end
-    if ns.keyPress or (IsInInstance and IsInInstance()) then
-        local ok = SendNow(text)
+    if ns.keyPress or (chatType == "EMOTE" and IsInInstance and IsInInstance()) then
+        local ok = SendNow(text, chatType)
         return ok, (not ok) and "blocked" or nil
     end
-    queue[#queue + 1] = { text = text, t = GetTime() }
+    queue[#queue + 1] = { text = text, chatType = chatType, t = GetTime() }
     lastEmote = GetTime()
     UI("UpdateEmotePrompt")
     C_Timer.After(ns.EMOTE_WAIT + 0.05, function() UI("UpdateEmotePrompt") end)   -- expire
@@ -614,27 +621,65 @@ local function AnnounceChallenge(g)
 end
 
 -- The "Announce" button on the result screen.
-function ns.AnnounceResult()
+-- Where a result can be announced. PARTY means your group: raid chat in a raid.
+ns.ANNOUNCE_CHANNELS = {
+    { key = "EMOTE", label = "Emote", where = "people nearby" },
+    { key = "PARTY", label = "Party", where = "your party" },
+    { key = "GUILD", label = "Guild", where = "your guild" },
+}
+
+-- Can you announce there right now? Returns ok, or false plus why not.
+function ns.ChannelAvailable(key)
+    if key == "PARTY" and not (IsInGroup and IsInGroup()) then return false, "You're not in a group." end
+    if key == "GUILD" and not (IsInGuild and IsInGuild()) then return false, "You're not in a guild." end
+    return true
+end
+
+local function ChatType(key)
+    if key == "PARTY" and IsInRaid and IsInRaid() then return "RAID" end
+    return key
+end
+
+-- channel: EMOTE / PARTY / GUILD (default: the saved choice). Choosing one here
+-- also makes it the default for next time.
+function ns.AnnounceResult(channel, keepDefault)
     local g = S.game
     if not g or g.state ~= "done" or g.announced then return end
+    channel = channel or ns.Setting("announceChannel")
+    local okHere, whyNot = ns.ChannelAvailable(channel)
+    if not okHere then Print(whyNot); return end
+    if not keepDefault and channel ~= ns.Setting("announceChannel") then ns.SetSetting("announceChannel", channel) end
+
     local opp, first = Short(g.opponent), FirstName(g.opponent)
     local n = #g.rolls
     local rolls = (n == 1) and "1 roll" or (n .. " rolls")
+    -- emotes read "Doctor Gup wins ...", party/guild lines are said in your own voice
+    local emote = channel == "EMOTE"
     local line
     if g.won and g.reason == "forfeit" then
-        line = n == 0
-            and ("wins a deathroll against %s%s - %s forfeited before the first roll."):format(opp, WagerText(g.wager, " for %sg"), first)
-            or ("wins a deathroll against %s%s after %s - %s forfeited."):format(opp, WagerText(g.wager, " for %sg"), rolls, first)
+        if n == 0 then
+            line = (emote and "wins a deathroll against %s%s - %s forfeited before the first roll."
+                or "Won a deathroll against %s%s - %s forfeited before the first roll."):format(opp, WagerText(g.wager, " for %sg"), first)
+        else
+            line = (emote and "wins a deathroll against %s%s after %s - %s forfeited."
+                or "Won a deathroll against %s%s after %s - %s forfeited."):format(opp, WagerText(g.wager, " for %sg"), rolls, first)
+        end
     elseif g.won then
-        line = ("wins a deathroll against %s%s in %s!"):format(opp, WagerText(g.wager, " for %sg"), rolls)
+        line = (emote and "wins a deathroll against %s%s in %s!" or "Won a deathroll against %s%s in %s!")
+            :format(opp, WagerText(g.wager, " for %sg"), rolls)
     elseif g.reason == "forfeit" then
-        line = n == 0
-            and ("forfeits a deathroll to %s%s before the first roll."):format(opp, WagerText(g.wager, " (%sg)"))
-            or ("forfeits a deathroll to %s%s after %s."):format(opp, WagerText(g.wager, " (%sg)"), rolls)
+        if n == 0 then
+            line = (emote and "forfeits a deathroll to %s%s before the first roll." or "Forfeited a deathroll to %s%s before the first roll.")
+                :format(opp, WagerText(g.wager, " (%sg)"))
+        else
+            line = (emote and "forfeits a deathroll to %s%s after %s." or "Forfeited a deathroll to %s%s after %s.")
+                :format(opp, WagerText(g.wager, " (%sg)"), rolls)
+        end
     else
-        line = ("loses a deathroll to %s%s after %s."):format(opp, WagerText(g.wager, " (%sg)"), rolls)
+        line = (emote and "loses a deathroll to %s%s after %s." or "Lost a deathroll to %s%s after %s.")
+            :format(opp, WagerText(g.wager, " (%sg)"), rolls)
     end
-    local ok, why = Emote(line)
+    local ok, why = Emote(line, ChatType(channel))
     if not ok then
         if why == "combat" then Print("Couldn't announce right now: you're in combat.") end
         return
@@ -642,10 +687,10 @@ function ns.AnnounceResult()
     if ns.Setting("announceMilestones") then
         for i, m in ipairs(g.milestones or {}) do
             if i > 2 then break end
-            Emote(m.emote)
+            Emote(emote and m.emote or (m.chat or m.label), ChatType(channel))
         end
     end
-    g.announced = true
+    g.announced = channel
     UI("Update")
 end
 
@@ -812,7 +857,7 @@ function ns.Forfeit()
     if g.noAddon then
         if ns.IsStalled(g) then ns.EndWithoutResult(); return end
         EndGame(S.me, "forfeit")
-        ns.AnnounceResult()                            -- they can only find out from chat
+        ns.AnnounceResult("EMOTE", true)               -- they can only find out from an emote
         return
     end
     Send(g.opponent, "FORF", g.id)

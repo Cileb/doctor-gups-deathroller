@@ -257,17 +257,97 @@ local function CreateGameFrame()
     f.double:HookScript("OnLeave", function() GameTooltip:Hide() end)
     f.closeBtn = W.Button(f, "Close", 148, 26, "neutral", function() f:Hide() end)
     f.closeBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    f.announce = W.Button(f, "Announce", 144, 26, "neutral", function() ns.AnnounceResult() end)
+    -- Announce is a split button: the main part announces to your usual channel,
+    -- the arrow opens a short menu to pick Emote, Party or Guild (and remembers it).
+    local function ChannelInfo(key)
+        for _, c in ipairs(ns.ANNOUNCE_CHANNELS) do if c.key == key then return c end end
+        return ns.ANNOUNCE_CHANNELS[1]
+    end
+    f.announce = W.Button(f, "Announce", 118, 26, "neutral", function()
+        if f.announceMenu:IsShown() then f.announceMenu:Hide() end
+        ns.AnnounceResult()
+    end)
     f.announce:SetPoint("BOTTOMLEFT", 12, 12)
     f.announce:SetScript("OnEnter", function(self)
         if self:IsEnabled() then self.bg:SetVertexColor(unpack(self.style.hi)) end
+        local c = ChannelInfo(ns.Setting("announceChannel"))
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Announce the result")
-        GameTooltip:AddLine("Your character emotes the result to everyone nearby" ..
-            (ns.Setting("announceMilestones") and ", plus any milestones." or "."), 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("Announce the result to " .. c.where)
+        local ok, why = ns.ChannelAvailable(c.key)
+        if not ok then
+            GameTooltip:AddLine(why .. " Use the arrow to pick another channel.", 1, 0.55, 0.45, true)
+        else
+            GameTooltip:AddLine((ns.Setting("announceMilestones") and "Includes any milestones. " or "")
+                .. "Use the arrow to pick Emote, Party or Guild.", 0.7, 0.7, 0.7, true)
+        end
         GameTooltip:Show()
     end)
     f.announce:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+    f.announceMore = W.Button(f, "", 24, 26, "neutral", function()
+        f.announceMenu:SetShown(not f.announceMenu:IsShown())
+    end)
+    f.announceMore:SetPoint("LEFT", f.announce, "RIGHT", 2, 0)
+    f.announceMore.arrow = f.announceMore:CreateTexture(nil, "OVERLAY")
+    f.announceMore.arrow:SetTexture("Interface\\Buttons\\Arrow-Up-Up")
+    f.announceMore.arrow:SetSize(12, 12)
+    f.announceMore.arrow:SetPoint("CENTER", 0, -2)
+    f.announceMore:SetScript("OnEnter", function(self)
+        if self:IsEnabled() then self.bg:SetVertexColor(unpack(self.style.hi)) end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Announce to...")
+        GameTooltip:Show()
+    end)
+    f.announceMore:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- the menu opens upward from the button, inside the window's style
+    local menu = CreateFrame("Frame", nil, f)
+    menu:SetSize(186, 8 + 3 * 30)
+    menu:SetPoint("BOTTOMLEFT", f.announce, "TOPLEFT", 0, 4)
+    menu:SetFrameLevel(f:GetFrameLevel() + 30)
+    menu:EnableMouse(true)
+    menu.bg = W.Tex(menu, C.header)
+    menu.bg:SetAllPoints()
+    W.Border(menu, { C.accent[1], C.accent[2], C.accent[3], 0.8 })
+    menu.rows = {}
+    for i, c in ipairs(ns.ANNOUNCE_CHANNELS) do
+        local row = CreateFrame("Button", nil, menu)
+        row:SetSize(178, 28)
+        row:SetPoint("TOPLEFT", 4, -4 - (i - 1) * 30)
+        row.key = c.key
+        row.hl = W.Tex(row, C.cardHi)
+        row.hl:SetAllPoints()
+        row.hl:Hide()
+        row.mark = W.Tex(row, { C.accent[1], C.accent[2], C.accent[3], 1 }, "ARTWORK")   -- current choice
+        row.mark:SetSize(2, 18)
+        row.mark:SetPoint("LEFT", 2, 0)
+        row.label = W.Text(row, 12, C.text)
+        row.label:SetPoint("TOPLEFT", 12, -3)
+        row.label:SetText(c.label)
+        row.note = W.Text(row, 10, C.muted)
+        row.note:SetPoint("TOPLEFT", 12, -16)
+        row:SetScript("OnEnter", function(self) if self:IsEnabled() then self.hl:Show() end end)
+        row:SetScript("OnLeave", function(self) self.hl:Hide() end)
+        row:SetScript("OnClick", function(self)
+            menu:Hide()
+            ns.AnnounceResult(self.key)
+        end)
+        menu.rows[i] = row
+    end
+    menu:SetScript("OnShow", function(self)
+        local current = ns.Setting("announceChannel")
+        for i, row in ipairs(self.rows) do
+            local c = ns.ANNOUNCE_CHANNELS[i]
+            local ok, why = ns.ChannelAvailable(c.key)
+            row:SetEnabled(ok)
+            row.label:SetTextColor(unpack(ok and C.text or C.muted))
+            row.note:SetText(ok and ("To " .. c.where) or why)
+            row.mark:SetShown(c.key == current)
+        end
+    end)
+    menu:Hide()
+    f.announceMenu = menu
+    f.announce:HookScript("OnHide", function() menu:Hide() end)
 
     W.ApplyScale(f)
     f:Hide()
@@ -412,8 +492,13 @@ local function UpdateLadder()
     f.ladder:SetText(table.concat(parts, W.Color("muted", "  >  ")))
 end
 
+local function ChannelLabel(key)
+    for _, c in ipairs(ns.ANNOUNCE_CHANNELS) do if c.key == key then return c.label end end
+    return "Emote"
+end
+
 local function ShowOnly(f, shown)
-    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "double", "closeBtn", "announce" }) do
+    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "double", "closeBtn", "announce", "announceMore" }) do
         f[key]:SetShown(shown[key] == true)
     end
 end
@@ -493,16 +578,22 @@ local function Update()
     else -- done
         local canAnnounce = ns.Setting("announceResults")
         local canDouble = ns.CanDouble(g)
-        ShowOnly(f, { series = true, milestones = true, rematch = true, double = canDouble, closeBtn = true, announce = canAnnounce })
+        ShowOnly(f, { series = true, milestones = true, rematch = true, double = canDouble, closeBtn = true, announce = canAnnounce, announceMore = canAnnounce })
         -- rows stay full width when a button is missing
         f.rematch:SetWidth(canDouble and 144 or 296)
         f.closeBtn:SetWidth(canAnnounce and 148 or 296)
         if g.announced then
-            f.announce:SetLabel("Announced")
+            local c = ChannelLabel(g.announced)
+            f.announce:SetLabel(g.announced == "EMOTE" and "Announced" or ("Sent to " .. c))
             f.announce:Disable()
+            f.announceMore:Disable()
+            f.announceMenu:Hide()
         else
-            f.announce:SetLabel("Announce")
-            f.announce:Enable()
+            -- the label says where it goes; a channel you can't use right now greys it out
+            local key = ns.Setting("announceChannel")
+            f.announce:SetLabel(key == "EMOTE" and "Announce" or ("Announce: " .. ChannelLabel(key)))
+            f.announce:SetEnabled((ns.ChannelAvailable(key)))
+            f.announceMore:Enable()
         end
         local labels = {}
         for i, m in ipairs(g.milestones or {}) do labels[i] = m.label end
@@ -883,7 +974,7 @@ local function PlacePrompt()
 end
 
 local function UpdateEmotePrompt()
-    local text, count, expires = ns.PendingEmote()
+    local text, count, expires, chatType = ns.PendingEmote()
     if not text then
         if prompt and prompt:IsShown() then
             prompt:Hide()
@@ -892,7 +983,17 @@ local function UpdateEmotePrompt()
         return
     end
     prompt = prompt or CreatePrompt()
-    prompt.preview:SetText(W.Color("muted", Short(S.me or "You")) .. " " .. text)
+    -- show it the way it will look in chat
+    local me = Short(S.me or "You")
+    local where = { PARTY = "your party", RAID = "your raid", GUILD = "your guild" }
+    if where[chatType] then
+        local tag = chatType == "GUILD" and "Guild" or (chatType == "RAID" and "Raid" or "Party")
+        prompt.caption:SetText(("ANNOUNCE TO %s?"):format(where[chatType]:upper()))
+        prompt.preview:SetText(W.Color("muted", ("[%s] %s:"):format(tag, me)) .. " " .. text)
+    else
+        prompt.caption:SetText("ANNOUNCE TO PEOPLE NEARBY?")
+        prompt.preview:SetText(W.Color("muted", me) .. " " .. text)
+    end
     prompt.count:SetText(count > 1 and ("1 of %d"):format(count) or "")
     prompt.expires = expires
     PlacePrompt()
