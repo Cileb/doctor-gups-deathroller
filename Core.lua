@@ -49,6 +49,7 @@ ns.DEFAULTS = {
     announceResults    = true,  -- show an "Announce" button on the result screen
     announceMilestones = true,  -- include milestones (streaks, biggest pot, ...) in that announcement
     announceChannel    = "EMOTE", -- where results go: EMOTE (people nearby), PARTY or GUILD
+    allowSpectators    = true,  -- others with the add-on can watch your games
     tips          = true,      -- helpful tips in chat
     minimap       = true,      -- show the minimap button
     minimapAngle  = 215,       -- degrees around the minimap
@@ -232,6 +233,8 @@ local function ParseRoll(msg)
     return FullName(who), tonumber(roll), tonumber(lo), tonumber(hi)
 end
 
+ns.ParseRoll = function(msg) return ParseRoll(msg) end
+
 -- Are game roll lines being hidden from chat (so the reveal should print them)?
 function ns.IsGameRollLineHidden()
     return ns.Setting("hideRollChat") and ns.Setting("animation") and ns.chatFilterActive == true
@@ -240,7 +243,11 @@ end
 -- Used by the chat filter: is this "X rolls N (1-M)" line part of the current game?
 function ns.IsGameRollLine(msg)
     local g = S.game
-    if not g or IsSecret(msg) then return false end
+    if IsSecret(msg) then return false end
+    if (not g or g.state == "done") and ns.IsWatchedRollLine then          -- a game you're watching
+        return ns.Setting("hideRollChat") and ns.Setting("animation") and ns.IsWatchedRollLine(msg) or false
+    end
+    if not g then return false end
     if not (ns.Setting("hideRollChat") and ns.Setting("animation")) then return false end
     local who, roll, lo, hi = ParseRoll(msg)
     if not who then return false end
@@ -731,6 +738,7 @@ end
 -- opts.double: this is a double-or-nothing rematch (shown to the other player)
 function ns.StartChallenge(target, wager, opts)
     local max = ns.START_ROLL
+    if ns.StopWatching then ns.StopWatching(true) end
     if ns.FFA_IsActive and ns.FFA_IsActive() then Print("Finish your Free For All first."); return end
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
@@ -774,6 +782,7 @@ end
 -- rematches), nil = an open challenge anyone nearby can take.
 function ns.StartOpenChallenge(wager, only, opts)
     local max = ns.START_ROLL
+    if ns.StopWatching then ns.StopWatching(true) end
     if ns.FFA_IsActive and ns.FFA_IsActive() then Print("Finish your Free For All first."); return end
     if S.game and S.game.state ~= "done" then
         Print("You're already in a deathroll. Finish it or /dr forfeit first.")
@@ -922,6 +931,7 @@ function ns.CoinFlip() return math.random(1, 2) == 1 end
 
 -- announce: whether to emote the accept (the popup's checkbox). nil = use your setting.
 function ns.AcceptInvite(announce)
+    if ns.StopWatching then ns.StopWatching(true) end
     local inv = S.invite
     if not inv then return end
     S.invite = nil
@@ -1036,6 +1046,9 @@ local function OnAddonMessage(text, sender)
     sender = FullName(sender)
     if not sender or SameName(sender, S.me) then return end
     if text:sub(1, 3) == "FFA" then ns.FFA_OnAddon(text, sender); return end   -- Free For All
+    if (text:sub(1, 1) == "W" or text:sub(1, 4) == "LIVE") and ns.Spec_OnAddon then   -- spectating
+        ns.Spec_OnAddon(text, sender); return
+    end
     local cmd, a, b, c, d, e, f, g7 = strsplit("|", text)
 
     if cmd == "PING" then
@@ -1215,6 +1228,7 @@ local function Help()
     Print("commands")
     print("   /dr (or /gup)  - with a player targeted: challenge them (choose your wager)")
     print("   /dr challenge First Last  - challenge someone who isn't targeted")
+    print("   /dr watch [First Last]  - watch your target's (or that player's) game")
     print("   /dr ffa [roll]  - Free For All: anyone types 1 to join, everyone rolls, lowest pays highest the difference")
     print("   /dr open [gold]  - open challenge: the first player nearby to /roll 100 takes it (no add-on needed)")
     print("   On your turn, type /roll N in the window's box (or in chat) and press Enter.")
@@ -1256,6 +1270,11 @@ OnSlash = function(input)
         end
         if not target then Print("Target a player and type /dr, or use /dr challenge First Last."); return end
         ns.OpenChallenge(target, wager)
+    elseif cmd == "watch" or cmd == "spectate" then
+        local name = table.concat(args, " ", 2)
+        ns.Watch(name ~= "" and NormalizeTypedName(name) or nil)
+    elseif cmd == "unwatch" or cmd == "stopwatch" then
+        ns.StopWatching()
     elseif cmd == "ffa" or cmd == "freeforall" then
         local n = tonumber(((args[2] or ""):gsub("[gG]$", "")))
         if n then ns.FFA_Start(n) else UI("ShowFFASetup") end

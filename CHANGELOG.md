@@ -1,5 +1,10 @@
 ## 1.5.0
 
+- **Watch games live: 1v1s and Free For Alls.** Target a player and type `/dr watch` (or `/dr watch First Last`), or open the stats window's new **Live** tab to see games in your guild and group, and click one to watch. You can watch from anywhere in the world.
+  - **1v1:** a read-only game window with both players, the pot, the odds bar, close calls, the roll ladder and the same dice reveal. Rolls stay out of your chat until the dice land, so nothing is spoiled. If you join partway through, you catch up on the game so far.
+  - **Free For All:** a read-only window showing players joining, rolls coming in, ties and who owes whom.
+  - Watching is silent, nothing is recorded for spectators, and closing the window stops watching. Up to 10 spectators per game.
+  - **Players see who's watching** ("2 watching" in the window title, with names on mouseover). Turn off **Let others watch your games** in Options to keep your games private. That also keeps them off the Live list.
 - **New game mode: Free For All.** Type `/dr ffa` (or click **Free For All** in the stats window), pick how high everyone rolls (for example 150), and start.
   - Your character emotes the game, and anyone nearby **types 1 in chat to join** (-1 to leave). Nobody else needs the add-on.
   - When you click **Start rolling** (or after 60 seconds), your character calls everyone in by name to `/roll 150`. Each player's first roll counts.

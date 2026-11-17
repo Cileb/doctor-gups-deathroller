@@ -20,7 +20,12 @@ local function check(cond, msg)
     if cond then print("  PASS  " .. msg) else print("  FAIL  " .. msg); failures = failures + 1 end
 end
 
-local function After(sec, fn) table.insert(timers, { at = clock + sec, fn = fn }) end
+-- like the real client, things due at the same moment happen in the order they were queued
+local timerSeq = 0
+local function After(sec, fn)
+    timerSeq = timerSeq + 1
+    table.insert(timers, { at = clock + sec, fn = fn, seq = timerSeq })
+end
 
 ---------------------------------------------------------------- widget mock
 local Methods = {}
@@ -191,6 +196,16 @@ local function NewClient(fullName, shard)
     env.C_ChatInfo = {
         RegisterAddonMessagePrefix = function() end,
         SendAddonMessage = function(prefix, msg, channel, target)
+            if channel ~= "WHISPER" then
+                -- guild / group: everyone else in it (flags set by the tests)
+                local flag = channel == "GUILD" and "inGuild" or "inGroup"
+                for _, other in ipairs(clients) do
+                    if other ~= c and other[flag] and other.fire then
+                        After(0.05, function() other.fire("CHAT_MSG_ADDON", prefix, msg, channel, fullName .. "-" .. shard) end)
+                    end
+                end
+                return 0
+            end
             local dest
             for _, other in ipairs(clients) do if other.name:lower() == target:lower() then dest = other end end
             if not dest then
@@ -237,7 +252,7 @@ local function Tick(seconds)
     local stop = clock + seconds
     while clock < stop do
         clock = clock + 0.05
-        table.sort(timers, function(a, b) return a.at < b.at end)
+        table.sort(timers, function(a, b) if a.at ~= b.at then return a.at < b.at end return a.seq < b.seq end)
         while timers[1] and timers[1].at <= clock do table.remove(timers, 1).fn() end
         for _, c in ipairs(clients) do
             for _, w in ipairs(c.widgets) do
@@ -313,6 +328,7 @@ local ok, err = xpcall(function()
     print("== setup")
     local A = NewClient("Doctor Gup", "CAMWOWUS1REALM3PvE")
     local B = NewClient("Meudayr Darkpaw", "CAMWOWUS1REALM5PvE")
+    local C = NewClient("Nora Watcher", "CAMWOWUS1REALM7PvE")    -- a third player, for spectating
     for _, c in ipairs(clients) do c.fire("ADDON_LOADED", "DoctorGupsDeathroller"); c.fire("PLAYER_LOGIN") end
     check(A.ns.state.me == "Doctor Gup", "own name uses first + last name")
     -- existing scenarios assume the challenger rolls first; the coin flip has its own section below
@@ -1411,6 +1427,125 @@ local ok, err = xpcall(function()
     check(#DBb.history == bh1 and Logged2(B, "doesn't match your roll (60)"), "a result that doesn't match your roll is ignored")
     B.ns.FFA_OnAddon("FFAR|other|150|2|Meudayr Darkpaw|Zed Stranger|149|1|148", "Some Stranger")
     check(#DBb.history == bh1, "a result for a game you never joined is ignored")
+
+    print("== spectating a 1v1")
+    local function Has(c, text)
+        for i = #c.logs, 1, -1 do if c.logs[i]:find(text, 1, true) then return true end end
+        return false
+    end
+    local CG, AG = C.env.GupsDeathrollerFrame, A.env.GupsDeathrollerFrame
+    local DBc = C.ns.GetDB()
+    local ch0 = #DBc.history
+    local function NewDuel(wager)
+        A.env.GupsDeathrollerFFAFrame:Hide(); A.ns.state.ffa = nil
+        AG:Hide(); B.env.GupsDeathrollerFrame:Hide()
+        B.ns.CoinFlip = function() return false end
+        Tick(25)
+        A.target = B.name
+        A.env.SlashCmdList.GUPSDEATHROLLER("challenge " .. wager); GoChallenge(A); Tick(0.2)
+        B.env.GupsDeathrollerInviteFrame.accept:Fire("OnClick"); Tick(0.5)
+    end
+    -- nobody to watch yet
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch Doctor Gup"); Tick(0.5)
+    check(Has(C, "Doctor Gup isn't in a game right now."), "watching someone who isn't playing: says so")
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch Ghost Player"); Tick(5)
+    check(Has(C, "No answer from Ghost Player"), "no add-on / offline: no answer")
+
+    NewDuel(25)
+    A.forced = { 60 }; TypeInBox(A, "/roll 100"); Tick(4)          -- one roll before C arrives
+    C.target = A.name
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch"); Tick(0.5)
+    local wg = C.ns.state.watch and C.ns.state.watch.game
+    check(wg and wg.left == A.name and wg.opponent == B.name and wg.max == 60 and #wg.rolls == 1 and wg.wager == 25,
+        "watching your target: caught up on the game so far")
+    check(CG:IsShown() and CG.title:GetText() == "Watching" and CG.me.name:GetText() == A.name
+        and CG.opp.name:GetText() == B.name and CG.stopWatch:IsShown() and not CG.input:IsShown(),
+        "read-only game window: both players, Stop watching, no roll box")
+    check(CG.status:GetText():find("Meudayr", 1, true) ~= nil and CG.status:GetText():find("/roll 60", 1, true) ~= nil,
+        "says who's up: " .. CG.status:GetText())
+    check(AG.watching:IsShown() and AG.watching.text:GetText() == "1 watching", "the player sees 1 watching")
+
+    -- a roll: C gets the same reveal, and the roll line is held back from C's chat until it lands
+    B.forced = { 12 }; TypeInBox(B, "/roll 60"); Tick(0.5)
+    check(#wg.rolls == 2 and CG.revealing and not wg.rolls[2].revealed, "spectator gets the dice reveal too")
+    check(Has(C, "[chat HIDDEN] Meudayr Darkpaw rolls 12 (1-60)"), "the roll line is held back from the spectator's chat")
+    Tick(4)
+    check(wg.rolls[2].revealed and wg.max == 12 and wg.turn == A.name and not CG.revealing, "it lands; Doctor is up")
+    check(CG.ladder:GetText():find("12", 1, true) ~= nil, "ladder shows it")
+    -- close calls show for spectators too
+    A.forced = { 3 }; TypeInBox(A, "/roll 12"); Tick(4)
+    check(CG.rangeLabel:GetText():find("CLOSE CALL", 1, true) ~= nil, "close call shows for the spectator")
+    B.forced = { 1 }; TypeInBox(B, "/roll 3"); Tick(5)
+    check(wg.state == "done" and wg.won == true, "B rolls a 1: Doctor wins")
+    check(CG.big:GetText() == "DOCTOR WINS" and CG.status:GetText():find("Meudayr rolled a 1", 1, true) ~= nil
+        and CG.stopWatch.text:GetText() == "Close", "result for the spectator: " .. CG.big:GetText())
+    check(#DBc.history == ch0, "nothing is recorded for the spectator")
+    CG.stopWatch:Fire("OnClick"); Tick(0.3)
+    check(not C.ns.state.watch and not CG:IsShown(), "Close stops watching")
+
+    print("== spectating: opt out, live list, can't watch while playing")
+    NewDuel(0)
+    B.ns.SetSetting("allowSpectators", false)
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch Meudayr Darkpaw"); Tick(0.5)
+    check(Has(C, "Meudayr Darkpaw doesn't allow spectators."), "opted out: refused")
+    B.ns.SetSetting("allowSpectators", true)
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch Meudayr Darkpaw"); Tick(0.5)
+    check(C.ns.state.watch and C.ns.state.watch.game.left == B.name and C.ns.state.watch.game.opponent == A.name,
+        "you can watch from either player's side")
+    B.ns.SetSetting("allowSpectators", false); Tick(0.5)
+    check(C.ns.state.watch.game.state == "done" and C.ns.state.watch.game.noResult, "turning it off mid-game lets spectators go")
+    B.ns.SetSetting("allowSpectators", true)
+    CG:Hide(); Tick(0.3)
+    -- playing yourself
+    C.target = A.name
+    C.ns.state.game = { state = "active", rolls = {} }
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch"); Tick(0.5)
+    check(not C.ns.state.watch and Has(C, "You can't watch while you're in a game yourself."), "can't watch while playing")
+    C.ns.state.game = nil
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.5)
+
+    -- live games in your guild
+    A.inGuild, C.inGuild = true, true
+    NewDuel(40)
+    Tick(0.5)
+    local lives = C.ns.LiveGames()
+    check(#lives == 1 and lives[1].kind == "duel" and lives[1].p1 == A.name and lives[1].p2 == B.name and lives[1].wager == 40,
+        "a guildmate's game shows in Live")
+    C.env.SlashCmdList.GUPSDEATHROLLER("stats"); Tick(0.1)
+    local CS = C.env.GupsDeathrollerStatsFrame
+    CS.tabs.buttons[4]:Fire("OnClick"); Tick(2.1)
+    check(CS.live:IsShown() and CS.tabs.buttons[4].text:GetText() == "Live (1)" and CS.live.list.data[1] ~= nil,
+        "Live tab lists it")
+    CS.live.list.rows[1]:Fire("OnClick"); Tick(0.5)
+    check(C.ns.state.watch and C.ns.state.watch.game and C.ns.state.watch.game.left == A.name, "clicking it starts watching")
+    A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(1)
+    check(#C.ns.LiveGames() == 0, "a finished game leaves the Live list")
+    check(C.ns.state.watch.game.state == "done" and C.ns.state.watch.game.reason == "forfeit" and not C.ns.state.watch.game.won,
+        "spectator sees the forfeit")
+    CS:Hide(); CG:Hide(); Tick(0.3)
+    A.inGuild, C.inGuild = nil, nil
+
+    print("== spectating a Free For All")
+    AG:Hide(); A.ns.ClearFinished(); Tick(1)
+    A.env.SlashCmdList.GUPSDEATHROLLER("ffa 100"); Tick(0.3)
+    C.env.SlashCmdList.GUPSDEATHROLLER("watch Doctor Gup"); Tick(0.5)
+    local CF = C.env.GupsDeathrollerFFAFrame
+    local wf = C.ns.state.watch and C.ns.state.watch.ffa
+    check(wf and wf.phase == "join" and #wf.players == 1 and CF:IsShown() and CF.title:GetText() == "Watching"
+        and not CF.left:IsShown() and CF.right.text:GetText() == "Stop watching", "watching a Free For All: read-only window")
+    Say("1", "Zed Stranger"); Say("1", B.name); Tick(0.5)
+    check(#wf.players == 3, "spectator sees players join")
+    A.env.GupsDeathrollerFFAFrame.right:Fire("OnClick"); Tick(0.5)
+    check(wf.phase == "roll", "and the call for rolls")
+    MyRoll(80); B.forced = { 15 }; B.env.RandomRoll(1, 100); Tick(0.3)
+    check(wf.players[1].roll == 80, "and rolls as they come in")
+    Line("Zed Stranger", 95, 100); Tick(0.5)
+    check(wf.phase == "done" and wf.result.winner == "Zed Stranger" and wf.result.payer == B.name and wf.result.amount == 80,
+        "and the result: " .. tostring(wf.result and wf.result.amount))
+    check(CF.big:GetText() == "80g" and CF.right.text:GetText() == "Close", "result in the spectator's window")
+    check(A.env.GupsDeathrollerFFAFrame.watching.text:GetText() == "1 watching", "host sees 1 watching")
+    CF:Hide(); Tick(0.5)
+    check(not C.ns.state.watch and #A.ns.WatcherNames() == 0, "closing it stops watching, host's count drops")
 end, debug.traceback)
 
 if not ok then print("ERROR: " .. tostring(err)); failures = failures + 1 end

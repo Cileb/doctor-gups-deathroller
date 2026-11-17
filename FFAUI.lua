@@ -9,7 +9,8 @@ local Short, FirstName, Num = ns.Short, ns.FirstName, ns.Num
 local frame
 local setup = false          -- showing the "pick a roll" step (no game yet)
 
-local PICKS = { 100, 150, 500, 1000 }
+-- A Free For All you're watching, or your own.
+local function View() return (S.watch and S.watch.ffa) or S.ffa end
 
 local function CurrentMax()
     local n = tonumber((frame.input:GetText() or ""):gsub("[,%s]", ""), 10)
@@ -32,8 +33,10 @@ local function Create()
     f:SetPoint("CENTER", 0, 100)
     tinsert(UISpecialFrames, "GupsDeathrollerFFAFrame")
     f:SetScript("OnHide", function()
+        if not f.ready then return end                   -- the Hide() at the end of setting it up
         f.input:ClearFocus()
         setup = false
+        if S.watch and S.watch.ffa then ns.StopWatching() end   -- closing it stops watching
         ns.FFA_Clear()                                   -- a finished game goes away with the window
     end)
 
@@ -52,7 +55,7 @@ local function Create()
     f.timer = W.TimerBar(f, 296, ns.FFA_JOIN_TIME)
     f.timer:SetPoint("TOP", 0, -158)
     f.timer:SetScript("OnUpdate", function(self)
-        local g = S.ffa
+        local g = View()
         if g and g.expires and g.phase ~= "done" then self:SetExpiry(g.expires) end
     end)
 
@@ -105,8 +108,25 @@ local function Create()
     end)
     f.right:SetPoint("BOTTOMRIGHT", -12, 12)
 
+    -- "2 watching" in the header (names on mouseover)
+    f.watching = CreateFrame("Button", nil, f.header)
+    f.watching:SetSize(90, 20)
+    f.watching:SetPoint("RIGHT", f.close, "LEFT", -2, 0)
+    f.watching.text = W.Text(f.watching, 10, C.muted, { justify = "RIGHT" })
+    f.watching.text:SetPoint("RIGHT", 0, 0)
+    f.watching:SetScript("OnEnter", function(self)
+        local names = ns.WatcherNames and ns.WatcherNames() or {}
+        if #names == 0 then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Watching this game")
+        for _, n in ipairs(names) do GameTooltip:AddLine(Short(n), 0.8, 0.8, 0.8) end
+        GameTooltip:Show()
+    end)
+    f.watching:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     W.ApplyScale(f)
     f:Hide()
+    f.ready = true
     frame = f
 end
 
@@ -150,17 +170,22 @@ local function Show(list, on) for _, w in ipairs(list) do w:SetShown(on) end end
 
 local function Update()
     if not frame then
-        if not (S.ffa or setup) then return end
+        if not (View() or setup) then return end
         Create()
     end
-    local f, g = frame, S.ffa
+    local f, g = frame, View()
     if not g and not setup then f:Hide(); return end
     f:Show()
+    f.title:SetText((g and g.spectate) and "Watching" or "Free For All")
+    local watchers = (g and not g.spectate and ns.WatcherNames) and ns.WatcherNames() or {}
+    f.watching.text:SetText(#watchers > 0 and ("%d watching"):format(#watchers) or "")
+    f.watching:SetShown(#watchers > 0)
 
     local setupParts = { f.input, f.picks, f.hint, f.howto }
     local gameParts = { f.list }
 
     if not g then -- setup
+        f.left:Show(); f.right:SetWidth(148)
         Show(setupParts, true); Show(gameParts, false)
         f.timer:Hide()
         f.rangeLabel:SetText("EVERYONE ROLLS 1 TO")
@@ -226,6 +251,18 @@ local function Update()
         local max = g.max
         f.left:SetLabel("Play again"); f.leftAction = function() S.ffa = nil; ns.FFA_Start(max) end
         f.right:SetLabel("Close"); f.right:Enable(); f.rightAction = function() f:Hide() end
+    end
+    if g.spectate then
+        -- read-only: just a way out
+        f.left:Hide()
+        f.right:SetLabel(g.phase == "done" and "Close" or "Stop watching")
+        f.right:Enable()
+        f.right:SetWidth(296)
+        f.rightAction = function() f:Hide() end
+        if g.result and g.result.calledOff then f.status:SetText("Called off.") end
+    else
+        f.left:Show()
+        f.right:SetWidth(148)
     end
     f.list:SetData(Rows(g), "No players yet.")
 end

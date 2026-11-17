@@ -87,6 +87,7 @@ function ns.FFA_Start(max)
     if max < ns.FFA_MIN_MAX then Print("Pick a roll of 2 or more, like /dr ffa 150."); return end
     if max > ns.MAX_WAGER then max = ns.MAX_WAGER end
     if ns.FFA_IsActive() then Print("A Free For All is already running."); return end
+    if ns.StopWatching then ns.StopWatching(true) end
     if S.game and S.game.state ~= "done" then
         Print("You're in a deathroll. Finish it or /dr forfeit first.")
         return

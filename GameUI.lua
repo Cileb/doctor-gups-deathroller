@@ -5,6 +5,16 @@ local W, C = ns.W, ns.W.C
 local S = ns.state
 local SameName, Short, FirstName, Num = ns.SameName, ns.Short, ns.FirstName, ns.Num
 
+-- What the window shows: a game you're watching, or your own.
+local function View()
+    local w = S.watch
+    if w and w.game then return w.game end
+    return S.game
+end
+
+-- The player on the left card: you, or (when watching) the player you asked.
+local function LeftName(g) return (g and g.spectate) and g.left or S.me end
+
 -- Seconds of dice animation before a result is shown, per "revealSpeed" option.
 local REVEAL_TIMES = { fast = 1.4, normal = 2.0, slow = 4.0 }
 local function RevealTime()
@@ -66,6 +76,7 @@ local function CreateGameFrame()
     tinsert(UISpecialFrames, "GupsDeathrollerFrame")      -- Escape closes it
     f:SetScript("OnHide", function()
         if f.input then f.input:ClearFocus() end      -- give the keyboard back
+        if S.watch and S.watch.game then ns.StopWatching() end   -- closing it stops watching
         ns.ClearFinished()
     end)
 
@@ -169,7 +180,7 @@ local function CreateGameFrame()
     f.timer:SetPoint("TOP", 0, -278)
     f.timer.label:SetText("Challenge expires")
     f.timer:SetScript("OnUpdate", function(self)
-        local g = S.game
+        local g = View()
         if g and (g.state == "pending" or g.state == "open") and g.expires then self:SetExpiry(g.expires) end
     end)
 
@@ -222,6 +233,25 @@ local function CreateGameFrame()
     f.forfeit:HookScript("OnLeave", function() GameTooltip:Hide() end)
     f.statsBtn = W.Button(f, "Stats", 90, 26, "ghost", function() ns.UI.ToggleStats() end)
     f.statsBtn:SetPoint("BOTTOMRIGHT", -12, 12)
+    f.stopWatch = W.Button(f, "Stop watching", 296, 26, "neutral", function() f:Hide() end)
+    f.stopWatch:SetPoint("BOTTOM", 0, 12)
+
+    -- "2 watching" in the header (names on mouseover)
+    f.watching = CreateFrame("Button", nil, f.header)
+    f.watching:SetSize(90, 20)
+    f.watching:SetPoint("RIGHT", f.close, "LEFT", -2, 0)
+    f.watching.text = W.Text(f.watching, 10, C.muted, { justify = "RIGHT" })
+    f.watching.text:SetPoint("RIGHT", 0, 0)
+    f.watching:SetScript("OnEnter", function(self)
+        local names = ns.WatcherNames and ns.WatcherNames() or {}
+        if #names == 0 then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Watching this game")
+        for _, n in ipairs(names) do GameTooltip:AddLine(Short(n), 0.8, 0.8, 0.8) end
+        GameTooltip:AddLine("Turn this off in Options: Let others watch your games.", 0.5, 0.5, 0.5, true)
+        GameTooltip:Show()
+    end)
+    f.watching:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.cancel = W.Button(f, "Cancel challenge", 296, 26, "neutral", function() ns.Forfeit() end)
     f.cancel:SetPoint("BOTTOM", 0, 12)
     -- result screen: [Rematch][Double or nothing] over [Announce][Close]
@@ -381,14 +411,14 @@ local function MyWinChance(g)
     for i = #g.rolls, 1, -1 do
         local r = g.rolls[i]
         if r.revealed then
-            if r.roll == 1 then return SameName(r.who, S.me) and 0 or 1 end
+            if r.roll == 1 then return SameName(r.who, LeftName(g)) and 0 or 1 end
             n = r.roll
-            roller = SameName(r.who, S.me) and g.opponent or S.me
+            roller = SameName(r.who, LeftName(g)) and g.opponent or LeftName(g)
             break
         end
     end
     local rollerWins = 1 - ns.LoseChance(n)
-    return SameName(roller, S.me) and rollerWins or (1 - rollerWins)
+    return SameName(roller, LeftName(g)) and rollerWins or (1 - rollerWins)
 end
 
 local function Pct(p) return ("%d%%"):format(math.floor(p * 100 + 0.5)) end
@@ -469,16 +499,18 @@ local function ApplyTension(g)
 end
 
 local function UpdateLadder()
-    local f, g = frame, S.game
+    local f, g = frame, View()
     local oppFirst = g.opponent and FirstName(g.opponent) or "them"
-    f.ladderLabel:SetText("ROLLS   " .. W.Color("gold", "you") .. "  " .. W.Color("opp", oppFirst:lower()))
+    local leftLabel = g.spectate and FirstName(g.left):lower() or "you"
+    f.ladderLabel:SetText("ROLLS   " .. W.Color("gold", leftLabel) .. "  " .. W.Color("opp", oppFirst:lower()))
 
     local parts = { W.Color("muted", Num(g.startMax)) }
+    if (g.skipped or 0) > 0 then parts[2] = W.Color("muted", "...") end    -- joined partway through
     for _, r in ipairs(g.rolls) do
         if r.revealed then
             local v
             if r.roll == 1 then v = W.Color("loss", "1")
-            else v = W.Color(SameName(r.who, S.me) and "gold" or "opp", Num(r.roll)) end
+            else v = W.Color(SameName(r.who, LeftName(g)) and "gold" or "opp", Num(r.roll)) end
             if not r.verified then v = v .. W.Color("muted", "*") end
             parts[#parts + 1] = v
         end
@@ -494,21 +526,72 @@ local function ChannelLabel(key)
 end
 
 local function ShowOnly(f, shown)
-    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "double", "closeBtn", "announce", "announceMore" }) do
+    for _, key in ipairs({ "timer", "input", "series", "milestones", "forfeit", "statsBtn", "cancel", "rematch", "double", "closeBtn", "announce", "announceMore", "stopWatch" }) do
         f[key]:SetShown(shown[key] == true)
     end
 end
 
+-- A game you're watching: read-only, both players named, no buttons but Stop watching.
+local function UpdateSpectate(f, g)
+    local left, right = g.left, g.opponent
+    ShowOnly(f, { stopWatch = true })
+    f.stopWatch:SetLabel(g.state == "done" and "Close" or "Stop watching")
+    if g.state == "pending" or g.state == "open" then
+        f.me:SetActive(false); f.opp:SetActive(false)
+        f.rangeLabel:SetText("STARTING ROLL")
+        f.big:SetText(Num(g.max))
+        f.big:SetTextColor(unpack(C.muted))
+        f.status:SetText(g.state == "open" and ("Waiting for someone to take %s's challenge"):format(FirstName(left))
+            or ("Waiting for %s to accept..."):format(W.Color("opp", FirstName(right or "?"))))
+    elseif g.state == "active" or g.state == "ending" then
+        local leftTurn = SameName(g.turn, left)
+        f.me:SetActive(leftTurn and g.state == "active", "ROLLING")
+        f.opp:SetActive(not leftTurn and g.state == "active", "ROLLING")
+        f.big:SetText(Num(g.max))
+        f.big:SetTextColor(unpack(C.text))
+        local level = TensionLevel(g)
+        if level > 0 then
+            f.rangeLabel:SetText(W.Color(level == 2 and "loss" or "warn", "CLOSE CALL") .. "   ROLL 1 TO")
+        else
+            f.rangeLabel:SetText("ROLL 1 TO   " .. W.Color("muted", "(" .. OneChance(g.max):lower() .. ")"))
+        end
+        f.status:SetText(("%s is up: /roll %s"):format(
+            W.Color(leftTurn and "gold" or "opp", FirstName(g.turn or "?")), Num(g.max)))
+    else -- done
+        f.me:SetActive(false); f.opp:SetActive(false)
+        f.rangeLabel:SetText("RESULT")
+        if g.noResult then
+            W.SetFont(f.big, 34, "OUTLINE", true)
+            f.big:SetText("-")
+            f.big:SetTextColor(unpack(C.muted))
+            f.status:SetText("Ended without a result.")
+        else
+            local winner = g.won and left or right
+            local loser = g.won and right or left
+            W.FitText(f.big, FirstName(winner):upper() .. " WINS", 296, 34, 20, { flags = "OUTLINE", title = true })
+            f.big:SetTextColor(unpack(g.won and C.gold or C.opp))
+            local how = g.reason == "forfeit" and "forfeited" or "rolled a 1"
+            local owe = g.wager > 0 and ("  -  owes %s %s"):format(FirstName(winner), W.Gold(g.wager)) or ""
+            f.status:SetText(FirstName(loser) .. " " .. how .. owe)
+        end
+    end
+end
+
 local function Update()
-    local f, g = frame, S.game
+    local f, g = frame, View()
     if not f then return end
     if not g then f:Hide(); return end
     if f.revealing then f:Show(); return end          -- the dice animation owns the window
 
+    f.title:SetText(g.spectate and "Watching" or "Deathroll")
+    local watchers = (not g.spectate and ns.WatcherNames) and ns.WatcherNames() or {}
+    f.watching.text:SetText(#watchers > 0 and ("%d watching"):format(#watchers) or "")
+    f.watching:SetShown(#watchers > 0)
     local opp = g.opponent and Short(g.opponent) or "Anyone nearby"
-    f.opp.label:SetText(g.noAddon and "NO ADD-ON" or "OPPONENT")
+    f.me.label:SetText(g.spectate and "PLAYER" or "YOU")
+    f.opp.label:SetText(g.spectate and "PLAYER" or (g.noAddon and "NO ADD-ON" or "OPPONENT"))
     -- cards are narrow: shrink long names, then fall back to the first name
-    W.FitText(f.me.name, Short(S.me), 118, 15, 11, { title = true, fallback = FirstName(S.me) })
+    W.FitText(f.me.name, Short(LeftName(g)), 118, 15, 11, { title = true, fallback = FirstName(LeftName(g)) })
     W.FitText(f.opp.name, opp, 118, 15, 11, { title = true, fallback = FirstName(opp) })
     f.pot:SetAmount(g.wager)
     f.potLabel:SetShown(g.wager > 0)
@@ -519,6 +602,12 @@ local function Update()
     f.dice:Hide()
 
     f.potLabel:SetText(g.double and W.Color("loss", "DOUBLE OR NOTHING") or "POT")
+    if g.spectate then
+        UpdateSpectate(f, g)
+        ApplyTension(g)
+        f:Show()
+        return
+    end
     if g.state == "pending" or g.state == "open" then
         ShowOnly(f, { timer = true, cancel = true })
         f.me:SetActive(false); f.opp:SetActive(false)
@@ -640,13 +729,15 @@ local function RunNextReveal()
     if not f then table.remove(queue, 1); job.done(); return RunNextReveal() end
 
     local e = job.entry
-    local isMe = SameName(e.who, S.me)
+    local vg = View()
+    local watching = vg and vg.spectate
+    local isMe = SameName(e.who, LeftName(vg))            -- "me" = the left card
     local color = isMe and C.gold or C.opp
     f.revealing = true
     f:Show()
     f.me:SetActive(isMe, "ROLLING")
     f.opp:SetActive(not isMe, "ROLLING")
-    f.rangeLabel:SetText(isMe and "YOU ROLL" or (FirstName(e.who):upper() .. " ROLLS"))
+    f.rangeLabel:SetText((isMe and not watching) and "YOU ROLL" or (FirstName(e.who):upper() .. " ROLLS"))
     f.status:SetText(("1 to %s ..."):format(Num(e.max)))
     f.input:ClearFocus()
     f.input:Disable()
@@ -678,19 +769,19 @@ local function RunNextReveal()
         -- Land on the real result.
         self:SetScript("OnUpdate", nil)
         e.revealed = true
-        if S.game then UpdateOdds(S.game) end        -- the bar moves the moment the number lands
+        if View() then UpdateOdds(View()) end        -- the bar moves the moment the number lands
         f.dice:Hide()
         f.dice:SetRotation(0)
         f.big:SetText(Num(e.roll))
         if e.roll == 1 then
             f.big:SetTextColor(unpack(C.loss))
             f.glow:SetVertexColor(unpack(C.loss))
-            f.status:SetText(W.Color("loss", (isMe and "You" or FirstName(e.who)) .. " rolled a 1!"))
+            f.status:SetText(W.Color("loss", ((isMe and not watching) and "You" or FirstName(e.who)) .. " rolled a 1!"))
             ns.Sound("RAID_WARNING")
         else
             f.big:SetTextColor(unpack(color))
             f.glow:SetVertexColor(unpack(color))
-            f.status:SetText((isMe and "You" or FirstName(e.who)) .. " rolled " .. W.Color(isMe and "gold" or "opp", Num(e.roll)))
+            f.status:SetText(((isMe and not watching) and "You" or FirstName(e.who)) .. " rolled " .. W.Color(isMe and "gold" or "opp", Num(e.roll)))
             ns.Sound("LOOT_WINDOW_COIN_SOUND")
         end
         f.flash:Stop(); f.flash:Play()
@@ -826,7 +917,7 @@ ns.OnSetting(function(key)
         W.ApplyScale(frame)
         W.ApplyScale(inviteFrame)
     elseif key == "closeCallFx" then
-        if frame and frame:IsShown() and S.game and not frame.revealing then Update() end
+        if frame and frame:IsShown() and View() and not frame.revealing then Update() end
     elseif key == "announceResults" then
         if frame and frame:IsShown() then Update() end
     elseif key == "autoFocus" or key == "prefillRoll" then

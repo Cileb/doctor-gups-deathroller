@@ -100,9 +100,12 @@ local function BuildContent(parent, left, top)
     local annMile = Check(parent, "announceMilestones", "Include milestones",
         "Adds streaks, your biggest pot and other milestones to that announcement.")
 
+    local spectate = Check(parent, "allowSpectators", "Let others watch your games",
+        "Players with the add-on can watch your games live, and your games show in your guild's and group's Live tab. Turn off to keep them private.")
+
     Stack(parent, left, top, {
         { turn }, { autoFocus, 12 }, { prefill, 6 },
-        { ann, 18 }, { annChal, 12 }, { annRes, 6 }, { annWhere, 8 }, { annMile, 8 },
+        { ann, 18 }, { annChal, 12 }, { annRes, 6 }, { annWhere, 8 }, { annMile, 8 }, { spectate, 6 },
     })
 
     -- Right column

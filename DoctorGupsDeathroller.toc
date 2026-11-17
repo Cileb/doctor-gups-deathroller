@@ -11,6 +11,7 @@
 Core.lua
 FFA.lua
 Widgets.lua
+Spectate.lua
 GameUI.lua
 FFAUI.lua
 ChallengeUI.lua

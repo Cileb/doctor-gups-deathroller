@@ -63,7 +63,7 @@ end
 -- Window
 ---------------------------------------------------------------------------
 
-local SetTab, RefreshHistory, RefreshDebts
+local SetTab, RefreshHistory, RefreshDebts, RefreshLive
 
 local function CreateStatsFrame()
     local DB = ns.GetDB()
@@ -80,9 +80,10 @@ local function CreateStatsFrame()
     tinsert(UISpecialFrames, "GupsDeathrollerStatsFrame")
 
     f.tabs = W.Segmented(f, {
-        { value = "overview", label = "Overview", width = 96 },
-        { value = "history",  label = "History",  width = 96 },
-        { value = "debts",    label = "Debts",    width = 96 },
+        { value = "overview", label = "Overview", width = 84 },
+        { value = "history",  label = "History",  width = 84 },
+        { value = "debts",    label = "Debts",    width = 84 },
+        { value = "live",     label = "Live",     width = 72 },
     }, function(v) SetTab(v) end)
     f.tabs:SetPoint("TOPLEFT", 12, -40)
 
@@ -275,6 +276,47 @@ local function CreateStatsFrame()
     de.selHint = W.Text(de, 10, C.muted)
     de.selHint:SetPoint("LEFT", de.forgive, "RIGHT", 12, 0)
 
+    -- Live page: games in your guild and group you can watch ---------------
+    local lv = CreateFrame("Frame", nil, f)
+    lv:SetPoint("TOPLEFT", 0, -72)
+    lv:SetPoint("BOTTOMRIGHT", 0, 46)
+    f.live = lv
+    local lTitle = W.Text(lv, 12, C.text)
+    lTitle:SetPoint("TOPLEFT", 14, 0)
+    lTitle:SetText("Live games")
+    local lHint = W.Text(lv, 10, C.muted, { justify = "RIGHT" })
+    lHint:SetPoint("TOPRIGHT", -14, -2)
+    lHint:SetText("click a game to watch it")
+    lv.list = W.ScrollList(lv, 536, 12, {
+        { title = "Game",   width = 270 },
+        { title = "Stakes", width = 100, justify = "RIGHT" },
+        { title = "Roll",   width = 80, justify = "RIGHT" },
+        { title = "",       width = 76, justify = "RIGHT" },
+    }, {
+        onClick = function(item) ns.Watch(item.server) end,
+        onEnter = function(row, item)
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(item.title, 1, 1, 1)
+            GameTooltip:AddLine("Click to watch. Close the game window to stop.", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end,
+    })
+    lv.list:SetPoint("TOPLEFT", 12, -20)
+    local lvbg = W.Card(lv.list)
+    lvbg:SetAllPoints()
+    lvbg:SetFrameLevel(lv.list:GetFrameLevel())
+    lv.how = W.Text(lv, 11, C.muted, { justify = "LEFT" })
+    lv.how:SetPoint("TOPLEFT", lv.list, "BOTTOMLEFT", 2, -10)
+    lv.how:SetWidth(530)
+    lv.how:SetText("Games from your guild and group show up here. To watch anyone else, target them and type "
+        .. W.Color("text", "/dr watch") .. ". You can watch from anywhere; nothing you watch is recorded.")
+    -- keep it fresh while it's open
+    lv.elapsed = 0
+    lv:SetScript("OnUpdate", function(self, dt)
+        self.elapsed = self.elapsed + dt
+        if self.elapsed >= 2 then self.elapsed = 0; RefreshLive() end
+    end)
+
     -- Footer ------------------------------------------------------------------
     f.reset = W.Button(f, "Reset stats", 110, 24, "ghost")
     f.reset:SetPoint("BOTTOMLEFT", 12, 12)
@@ -431,6 +473,27 @@ RefreshDebts = function()
     frame.tabs.buttons[3].text:SetText(n > 0 and ("Debts (%d)"):format(n) or "Debts")
 end
 
+RefreshLive = function()
+    if not frame then return end
+    local items = {}
+    for _, e in ipairs(ns.LiveGames and ns.LiveGames() or {}) do
+        local title, stakes, cells
+        if e.kind == "duel" then
+            title = ("%s vs %s"):format(Short(e.p1), Short(e.p2))
+            stakes = (e.wager or 0) > 0 and W.Gold(e.wager) or W.Color("muted", "friendly")
+            cells = { W.Color("gold", Short(e.p1)) .. W.Color("muted", "  vs  ") .. W.Color("opp", Short(e.p2)),
+                stakes, "1-" .. Num(e.max), W.Color("gold", "Watch") }
+        else
+            title = ("%s's Free For All"):format(Short(e.host))
+            cells = { W.Color("gold", Short(e.host)) .. W.Color("muted", "'s Free For All  ·  " .. (e.count or 0) .. " in"),
+                W.Color("muted", e.phase == "join" and "joining" or "rolling"), "1-" .. Num(e.max), W.Color("gold", "Watch") }
+        end
+        items[#items + 1] = { server = e.server, title = title, cells = cells }
+    end
+    frame.live.list:SetData(items, "No live games in your guild or group right now.")
+    frame.tabs.buttons[4].text:SetText(#items > 0 and ("Live (%d)"):format(#items) or "Live")
+end
+
 local function Refresh()
     if not frame or not frame:IsShown() then return end
     local DB = ns.GetDB()
@@ -439,6 +502,7 @@ local function Refresh()
     RefreshOverview()
     RefreshHistory()
     RefreshDebts()
+    RefreshLive()
 end
 
 SetTab = function(tab)
@@ -446,6 +510,7 @@ SetTab = function(tab)
     frame.overview:SetShown(tab == "overview")
     frame.history:SetShown(tab == "history")
     frame.debts:SetShown(tab == "debts")
+    frame.live:SetShown(tab == "live")
     Refresh()
 end
 
