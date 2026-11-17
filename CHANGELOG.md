@@ -1,3 +1,7 @@
+## 1.4.2
+
+- **The "Press Enter to post" box is now centred over the game window,** wherever you've moved it, instead of the middle of the screen. It still sits in front of everything.
+
 ## 1.4.1
 
 - **No more "Press Enter" prompt for challenge announcements.** You already turn these on or off in Options ("Announce challenges"), so challenge, accept, double-or-nothing and call-off emotes no longer ask. After a click, they go out on your next key press outside a text box, such as moving. They never take Enter, so they can't get in the way of typing /roll 100.

@@ -1068,7 +1068,7 @@ local ok, err = xpcall(function()
     check(bar and bar:IsShown() and bar.preview:GetText():find("issues an open deathroll challenge for 1g!", 1, true) ~= nil,
         "the Enter bar shows what will be posted")
     local GFd = A.env.GupsDeathrollerFrame
-    check(bar:GetParent() == A.env.UIParent and bar:GetPoint() == "CENTER", "the bar sits in the centre of the screen")
+    check(bar:GetPoint() == "CENTER" and select(2, bar:GetPoint()) == GFd, "the box is centred over the game window")
     bar:Fire("OnKeyDown", "W")
     check(#A.emotes == n0 and bar:IsShown() and bar._propagate == true, "other keys pass through and post nothing")
     bar:Fire("OnKeyDown", "ENTER")

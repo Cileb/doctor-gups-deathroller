@@ -838,7 +838,7 @@ end)
 ------------------------------------------------------------------------
 -- "Press Enter to post" tray. On Forever an add-on can only emote after a key
 -- press (a click doesn't count), so after a click the announcement waits here.
--- It sits in the centre of the screen, in front of everything.
+-- It sits centred over the game window, in front of everything.
 -- Only Enter and Esc are taken; every other key keeps working as normal.
 ------------------------------------------------------------------------
 local prompt
@@ -943,13 +943,18 @@ local function CreatePrompt()
     return f
 end
 
--- Centre of the screen, in front of everything: it's a quick yes/no.
+-- Centred over the game window, wherever it is (and follows it if it's dragged),
+-- in front of everything. Centre of the screen if there's no window yet.
 local function PlacePrompt()
     prompt:ClearAllPoints()
     prompt:SetParent(UIParent)
     prompt:SetFrameStrata("FULLSCREEN_DIALOG")
     prompt:SetScale(ns.Setting("scale") or 1)
-    prompt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    if frame then
+        prompt:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    else
+        prompt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
 end
 
 local function UpdateEmotePrompt()
