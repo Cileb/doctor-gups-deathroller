@@ -1,3 +1,7 @@
+## 1.5.1
+
+- **Clearer "Press Enter to post" box.** The window behind it now dims, so the box stands out. The box itself is bigger, with a brighter brass edge and a soft shadow, and the question ("Announce to people nearby?") sits in a header. The message is shown in its real chat colour (emote orange, party blue, guild green), so you can see exactly what will appear. ENTER is a bold gold key with a glow, and the countdown line is thicker. It sits over whichever window it belongs to, including the Free For All window.
+
 ## 1.5.0
 
 - **Watch games live: 1v1s and Free For Alls.** Target a player and type `/dr watch` (or `/dr watch First Last`), or open the stats window's new **Live** tab to see games in your guild and group, and click one to watch. You can watch from anywhere in the world.

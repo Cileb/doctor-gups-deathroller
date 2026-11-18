@@ -1094,12 +1094,16 @@ local ok, err = xpcall(function()
         "the Enter bar shows what will be posted")
     local GFd = A.env.GupsDeathrollerFrame
     check(bar:GetPoint() == "CENTER" and select(2, bar:GetPoint()) == GFd, "the box is centred over the game window")
+    local scrimA = A.env.GupsDeathrollerEmoteScrim
+    check(scrimA and scrimA:IsShown() and bar.caption:GetText() == "Announce to people nearby?",
+        "the window behind it is dimmed; the question is in the header")
     bar:Fire("OnKeyDown", "W")
     check(#A.emotes == n0 and bar:IsShown() and bar._propagate == true, "other keys pass through and post nothing")
     bar:Fire("OnKeyDown", "ENTER")
     check(A.emotes[#A.emotes] == "EMOTE: issues an open deathroll challenge for 1g! /roll 100 to accept.",
         "Enter posts it: " .. tostring(A.emotes[#A.emotes]))
     check(not bar:IsShown() and bar._propagate == false, "bar closes, and Enter doesn't also open chat")
+    check(not scrimA:IsShown(), "and the dimming goes with it")
     A.env.SlashCmdList.GUPSDEATHROLLER("forfeit"); Tick(0.1)   -- typed: the call-off goes out at once
     check(A.emotes[#A.emotes] == "EMOTE: calls off the deathroll." and not bar:IsShown(), "a typed /dr command emotes at once, no bar")
     n0 = #A.emotes
@@ -1223,7 +1227,7 @@ local ok, err = xpcall(function()
     A.autoKeys = false
     AF2.announce:Fire("OnClick"); Tick(0.1)
     local bar2 = A.env.GupsDeathrollerEmotePrompt
-    check(bar2:IsShown() and bar2.caption:GetText() == "ANNOUNCE TO YOUR PARTY?"
+    check(bar2:IsShown() and bar2.caption:GetText() == "Announce to your party?"
         and bar2.preview:GetText():find("[Party] Doctor Gup:", 1, true) ~= nil, "the Enter bar shows it as a party message")
     bar2:Fire("OnKeyDown", "ENTER")
     check(A.emotes[#A.emotes] == "PARTY: Won a deathroll against Meudayr Darkpaw in 2 rolls!", "Enter sends it to party")

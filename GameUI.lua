@@ -932,45 +932,77 @@ end)
 -- It sits centred over the game window, in front of everything.
 -- Only Enter and Esc are taken; every other key keeps working as normal.
 ------------------------------------------------------------------------
-local prompt
-local TRAY_H = 78
+local prompt, scrim
+local PROMPT_W, PROMPT_H = 360, 150
 
-local function KeyCap(parent, label)
+-- How each channel looks in the chat frame, so the preview reads like the real line.
+local CHAT_COLOR = {
+    EMOTE = { 1, 0.5, 0.25 }, PARTY = { 0.67, 0.67, 1 }, RAID = { 1, 0.5, 0 }, GUILD = { 0.25, 1, 0.25 },
+}
+
+local function KeyCap(parent, label, primary)
     local cap = CreateFrame("Frame", nil, parent)
-    cap:SetHeight(18)
-    local bg = W.Tex(cap, C.card, "BACKGROUND")
-    bg:SetAllPoints()
-    W.Border(cap, { C.accent[1], C.accent[2], C.accent[3], 0.8 })
-    cap.text = W.Text(cap, 10, C.gold, { flags = "OUTLINE" })
+    cap:SetHeight(26)
+    cap.bg = W.Tex(cap, primary and C.gold or C.card, "BACKGROUND")
+    cap.bg:SetAllPoints()
+    W.Border(cap, primary and { 1, 0.9, 0.55, 1 } or { C.accent[1], C.accent[2], C.accent[3], 0.8 })
+    cap.text = W.Text(cap, 12, primary and { 0.12, 0.08, 0.04, 1 } or C.gold, primary and {} or { flags = "OUTLINE" })
     cap.text:SetPoint("CENTER", 0, 0)
     cap.text:SetText(label)
-    cap:SetWidth(cap.text:GetStringWidth() + 14)
+    cap:SetWidth(math.max(44, cap.text:GetStringWidth() + 22))
     return cap
+end
+
+-- Dims the window behind the box (and catches stray clicks on it).
+local function CreateScrim()
+    local d = CreateFrame("Frame", "GupsDeathrollerEmoteScrim", UIParent)
+    d:SetFrameStrata("FULLSCREEN_DIALOG")
+    d:SetFrameLevel(1)
+    d:EnableMouse(true)
+    d.tex = W.Tex(d, { 0, 0, 0, 0.62 })
+    d.tex:SetAllPoints()
+    d.fade = d:CreateAnimationGroup()
+    local a = d.fade:CreateAnimation("Alpha")
+    a:SetFromAlpha(0); a:SetToAlpha(1); a:SetDuration(0.15)
+    d:SetScript("OnShow", function(self) self.fade:Play() end)
+    d:Hide()
+    return d
 end
 
 local function CreatePrompt()
     local f = CreateFrame("Frame", "GupsDeathrollerEmotePrompt", UIParent)
-    f:SetSize(320, TRAY_H)
-    f:SetFrameStrata("DIALOG")
+    f:SetSize(PROMPT_W, PROMPT_H)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetFrameLevel(20)
     f:EnableMouse(true)
-    -- same wood and brass as the other windows: brass outline, a fine inner rail
+
+    -- soft shadow so it lifts off whatever is behind it
+    f.shadow = CreateFrame("Frame", nil, f)
+    f.shadow:SetPoint("TOPLEFT", -6, 6); f.shadow:SetPoint("BOTTOMRIGHT", 6, -6)
+    f.shadow:SetFrameLevel(f:GetFrameLevel() - 1)
+    W.Tex(f.shadow, { 0, 0, 0, 0.55 }, "BACKGROUND"):SetAllPoints()
+
+    -- wood and brass, like the other windows, with a brighter brass edge
     f.bg = W.Tex(f, C.bg)
     f.bg:SetAllPoints()
-    W.Border(f)
+    W.Border(f, { 1, 0.85, 0.45, 1 })
     local inner = CreateFrame("Frame", nil, f)
-    inner:SetPoint("TOPLEFT", 1, -1); inner:SetPoint("BOTTOMRIGHT", -1, 1)
-    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.45 })
+    inner:SetPoint("TOPLEFT", 2, -2); inner:SetPoint("BOTTOMRIGHT", -2, 2)
+    W.Border(inner, { C.accent[1], C.accent[2], C.accent[3], 0.5 })
 
-    f.caption = W.Text(f, 10, C.gold)
-    f.caption:SetPoint("TOPLEFT", 12, -10)
-    f.caption:SetText("ANNOUNCE TO PEOPLE NEARBY?")
-    f.count = W.Text(f, 10, C.muted, { justify = "RIGHT" })
-    f.count:SetPoint("TOPRIGHT", -30, -10)
+    -- header strip with the question
+    f.head = W.Tex(f, C.header, "BORDER")
+    f.head:SetPoint("TOPLEFT", 3, -3); f.head:SetPoint("TOPRIGHT", -3, -3)
+    f.head:SetHeight(30)
+    f.caption = W.Text(f, 15, C.gold, { title = true })
+    f.caption:SetPoint("TOPLEFT", 14, -10)
+    f.count = W.Text(f, 11, C.muted, { justify = "RIGHT" })
+    f.count:SetPoint("TOPRIGHT", -34, -12)
     -- mouse users can still dismiss it (skipping needs no key press)
     f.close = CreateFrame("Button", nil, f)
-    f.close:SetSize(16, 16)
-    f.close:SetPoint("TOPRIGHT", -8, -7)
-    f.close.text = W.Text(f.close, 12, C.muted)
+    f.close:SetSize(20, 20)
+    f.close:SetPoint("TOPRIGHT", -8, -8)
+    f.close.text = W.Text(f.close, 14, C.muted)
     f.close.text:SetPoint("CENTER")
     f.close.text:SetText("x")
     f.close:SetScript("OnClick", function() ns.SkipEmotes() end)
@@ -982,41 +1014,62 @@ local function CreatePrompt()
     end)
     f.close:SetScript("OnLeave", function(self) self.text:SetTextColor(unpack(C.muted)); GameTooltip:Hide() end)
 
-    f.preview = W.Text(f, 12, C.text, { justify = "LEFT" })
-    f.preview:SetPoint("TOPLEFT", 12, -25)
-    f.preview:SetWidth(296)
+    -- the message, in a dark well, in its chat colour
+    f.well = CreateFrame("Frame", nil, f)
+    f.well:SetPoint("TOPLEFT", 12, -42); f.well:SetPoint("TOPRIGHT", -12, -42)
+    f.well:SetHeight(48)
+    W.Tex(f.well, { 0, 0, 0, 0.45 }, "BACKGROUND"):SetAllPoints()
+    W.Border(f.well, C.line)
+    f.preview = W.Text(f.well, 13, C.text, { justify = "LEFT" })
+    f.preview:SetPoint("LEFT", 10, 0)
+    f.preview:SetWidth(PROMPT_W - 44)
     f.preview:SetMaxLines(2)
 
-    f.enter = KeyCap(f, "ENTER")
-    f.enter:SetPoint("BOTTOMLEFT", 12, 10)
-    f.enterText = W.Text(f, 11, C.text)
-    f.enterText:SetPoint("LEFT", f.enter, "RIGHT", 6, 0)
+    -- keys
+    f.enter = KeyCap(f, "ENTER", true)
+    f.enter:SetPoint("BOTTOMLEFT", 14, 16)
+    f.enterText = W.Text(f, 13, C.text)
+    f.enterText:SetPoint("LEFT", f.enter, "RIGHT", 8, 0)
     f.enterText:SetText("Post")
     f.esc = KeyCap(f, "ESC")
-    f.esc:SetPoint("LEFT", f.enterText, "RIGHT", 16, 0)
-    f.escText = W.Text(f, 11, C.muted)
-    f.escText:SetPoint("LEFT", f.esc, "RIGHT", 6, 0)
+    f.esc:SetPoint("LEFT", f.enterText, "RIGHT", 22, 0)
+    f.escText = W.Text(f, 13, C.muted)
+    f.escText:SetPoint("LEFT", f.esc, "RIGHT", 8, 0)
     f.escText:SetText("Skip")
     -- why a key and not a click, for anyone who wonders
     f.why = W.Text(f, 10, C.muted, { justify = "RIGHT" })
-    f.why:SetPoint("BOTTOMRIGHT", -12, 13)
+    f.why:SetPoint("BOTTOMRIGHT", -14, 23)
     f.why:SetText("WoW needs a key press")
 
-    -- a slow glow on ENTER so the eye finds it
-    f.enterPulse = f.enter:CreateAnimationGroup()
+    -- a slow glow around ENTER so the eye finds it
+    f.glow = CreateFrame("Frame", nil, f)
+    f.glow:SetPoint("TOPLEFT", f.enter, -3, 3); f.glow:SetPoint("BOTTOMRIGHT", f.enter, 3, -3)
+    W.Border(f.glow, { 1, 0.85, 0.4, 1 })
+    f.enterPulse = f.glow:CreateAnimationGroup()
     f.enterPulse:SetLooping("BOUNCE")
     local a = f.enterPulse:CreateAnimation("Alpha")
-    a:SetFromAlpha(1); a:SetToAlpha(0.55); a:SetDuration(0.8)
+    a:SetFromAlpha(1); a:SetToAlpha(0.1); a:SetDuration(0.8)
 
-    -- time left before it's dropped: a thin brass line along the bottom
-    f.timeBar = W.Tex(f, { C.accent[1], C.accent[2], C.accent[3], 0.8 }, "ARTWORK", 2)
-    f.timeBar:SetHeight(2)
-    f.timeBar:SetPoint("BOTTOMLEFT", 1, 1)
+    -- fade in
+    f.fade = f:CreateAnimationGroup()
+    local fa = f.fade:CreateAnimation("Alpha")
+    fa:SetFromAlpha(0); fa:SetToAlpha(1); fa:SetDuration(0.15)
+
+    -- time left before it's dropped: a brass line along the bottom
+    f.timeBar = W.Tex(f, { 1, 0.85, 0.45, 0.9 }, "ARTWORK", 2)
+    f.timeBar:SetHeight(3)
+    f.timeBar:SetPoint("BOTTOMLEFT", 3, 3)
     f:SetScript("OnUpdate", function(self)
+        -- its window closed, or (if it opened before its window) the window just appeared
+        local ffa = _G.GupsDeathrollerFFAFrame
+        if (self.host and not self.host:IsShown())
+            or (not self.host and ((frame and frame:IsShown()) or (ffa and ffa:IsShown()))) then
+            ns.UI.UpdateEmotePrompt()
+        end
         if not self.expires then return end
         local left = self.expires - GetTime()
         if left <= 0 then ns.UI.UpdateEmotePrompt(); return end
-        self.timeBar:SetWidth(math.max(1, 318 * left / ns.EMOTE_WAIT))
+        self.timeBar:SetWidth(math.max(1, (PROMPT_W - 6) * left / ns.EMOTE_WAIT))
     end)
 
     -- keys: take Enter and Esc, pass everything else on. Esc here skips the
@@ -1028,23 +1081,35 @@ local function CreatePrompt()
         local used = ns.EmotePromptKey(key)
         self:SetPropagateKeyboardInput(not used)
     end)
-    f:SetScript("OnShow", function(self) self.enterPulse:Play() end)
-    f:SetScript("OnHide", function(self) self.enterPulse:Stop() end)
+    f:SetScript("OnShow", function(self) self.fade:Play(); self.enterPulse:Play() end)
+    f:SetScript("OnHide", function(self)
+        self.enterPulse:Stop()
+        if scrim then scrim:Hide() end
+    end)
     f:Hide()
     return f
 end
 
--- Centred over the game window, wherever it is (and follows it if it's dragged),
--- in front of everything. Centre of the screen if there's no window yet.
+-- Centred over the window it belongs to (the Free For All window or the game
+-- window, whichever is open), which is dimmed behind it. Centre of the screen,
+-- with nothing dimmed, if neither is open.
 local function PlacePrompt()
+    local ffa = _G.GupsDeathrollerFFAFrame
+    local host = (ffa and ffa:IsShown() and ffa) or (frame and frame:IsShown() and frame) or nil
+    prompt.host = host
     prompt:ClearAllPoints()
     prompt:SetParent(UIParent)
     prompt:SetFrameStrata("FULLSCREEN_DIALOG")
     prompt:SetScale(ns.Setting("scale") or 1)
-    if frame then
-        prompt:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    scrim = scrim or CreateScrim()
+    if host then
+        prompt:SetPoint("CENTER", host, "CENTER", 0, 0)
+        scrim:ClearAllPoints()
+        scrim:SetAllPoints(host)
+        scrim:Show()
     else
         prompt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        scrim:Hide()
     end
 end
 
@@ -1055,16 +1120,18 @@ local function UpdateEmotePrompt()
         return
     end
     prompt = prompt or CreatePrompt()
-    -- show it the way it will look in chat
+    -- show it the way it will look in chat, in that channel's colour
     local me = Short(S.me or "You")
+    local color = CHAT_COLOR[chatType] or CHAT_COLOR.EMOTE
+    prompt.preview:SetTextColor(color[1], color[2], color[3])
     local where = { PARTY = "your party", RAID = "your raid", GUILD = "your guild" }
     if where[chatType] then
         local tag = chatType == "GUILD" and "Guild" or (chatType == "RAID" and "Raid" or "Party")
-        prompt.caption:SetText(("ANNOUNCE TO %s?"):format(where[chatType]:upper()))
-        prompt.preview:SetText(W.Color("muted", ("[%s] %s:"):format(tag, me)) .. " " .. text)
+        prompt.caption:SetText(("Announce to %s?"):format(where[chatType]))
+        prompt.preview:SetText(("[%s] %s: %s"):format(tag, me, text))
     else
-        prompt.caption:SetText("ANNOUNCE TO PEOPLE NEARBY?")
-        prompt.preview:SetText(W.Color("muted", me) .. " " .. text)
+        prompt.caption:SetText("Announce to people nearby?")
+        prompt.preview:SetText(me .. " " .. text)
     end
     prompt.count:SetText(count > 1 and ("1 of %d"):format(count) or "")
     prompt.expires = expires
